@@ -929,58 +929,63 @@ local function finish_session(session, reason)
         messages[#messages + 1] = "战斗点评：" .. tostring(comment)
     end
 
-    if #teams > 1 then
-        local team = teams[1]
-        local team_percent = session.total_damage > 0 and team.damage * 100 / session.total_damage or 0
-        messages[#messages + 1] = string.format(
-            "最高伤害队伍：%s｜伤害 %s｜%.1f%%｜DPS %s",
-            team.name,
-            format_integer(team.damage),
-            team_percent,
-            format_integer(team.damage / duration)
-        )
-    end
-
-
-    local direct_players = {}
-    for _, row in ipairs(rows) do
-        if row.direct_damage > 0 then
-            direct_players[#direct_players + 1] = {
-                name = row.name,
-                damage = row.direct_damage,
-                hits = row.direct_hits,
-            }
+    if config.EnableDetailedAwards == true then
+        if #teams > 1 then
+            local team = teams[1]
+            local team_percent = session.total_damage > 0 and team.damage * 100 / session.total_damage or 0
+            messages[#messages + 1] = string.format(
+                "最高伤害队伍：%s｜伤害 %s｜%.1f%%｜DPS %s",
+                team.name,
+                format_integer(team.damage),
+                team_percent,
+                format_integer(team.damage / duration)
+            )
         end
-    end
-    direct_players = ranked_damage_entries(direct_players)
-    if #direct_players > 0 then
-        local direct = direct_players[1]
-        messages[#messages + 1] = string.format(
-            "最高伤害玩家角色：%s｜伤害 %s｜DPS %s",
-            direct.name,
-            format_integer(direct.damage),
-            format_integer(direct.damage / duration)
-        )
-    end
 
-    if #pals > 0 then
-        local pal = pals[1]
-        messages[#messages + 1] = string.format(
-            "最高伤害帕鲁：%s｜训练家 %s｜伤害 %s｜DPS %s",
-            pal.name,
-            pal.owner_name,
-            format_integer(pal.damage),
-            format_integer(pal.damage / duration)
-        )
+        local direct_players = {}
+        for _, row in ipairs(rows) do
+            if row.direct_damage > 0 then
+                direct_players[#direct_players + 1] = {
+                    name = row.name,
+                    damage = row.direct_damage,
+                    hits = row.direct_hits,
+                }
+            end
+        end
+        direct_players = ranked_damage_entries(direct_players)
+        if #direct_players > 0 then
+            local direct = direct_players[1]
+            messages[#messages + 1] = string.format(
+                "最高伤害玩家角色：%s｜伤害 %s｜DPS %s",
+                direct.name,
+                format_integer(direct.damage),
+                format_integer(direct.damage / duration)
+            )
+        end
+
+        if #pals > 0 then
+            local pal = pals[1]
+            messages[#messages + 1] = string.format(
+                "最高伤害帕鲁：%s｜训练家 %s｜伤害 %s｜DPS %s",
+                pal.name,
+                pal.owner_name,
+                format_integer(pal.damage),
+                format_integer(pal.damage / duration)
+            )
+        end
     end
 
     local max_rows = math.max(1, math.floor(to_number(config.MaxResultRows)))
     for index = 1, math.min(max_rows, #rows) do
         local row = rows[index]
         local percent = session.total_damage > 0 and row.damage * 100 / session.total_damage or 0
+        local rank_label = string.format("#%d", index)
+        if index == 1 and config.MarkTopAsMVP ~= false then
+            rank_label = "MVP #1"
+        end
         local line = string.format(
-            "#%d %s｜伤害 %s｜%.1f%%",
-            index, row.name, format_integer(row.damage), percent
+            "%s %s｜伤害 %s｜%.1f%%",
+            rank_label, row.name, format_integer(row.damage), percent
         )
         if config.ShowDPS == true then
             line = line .. string.format("｜DPS %s", format_integer(row.damage / duration))
@@ -996,7 +1001,9 @@ local function finish_session(session, reason)
         tostring(reason), session.name, format_integer(session.total_damage), duration, #rows
     ))
     queue_messages(messages, recipients)
-    queue_team_details(session, duration)
+    if config.EnableTeamDetails == true then
+        queue_team_details(session, duration)
+    end
 end
 
 local function start_session(boss_info)
@@ -1111,6 +1118,9 @@ local function record_damage(session, player_state, damage, source_kind, source_
 end
 
 local function publish_progress()
+    if config.EnableProgressReports ~= true then
+        return
+    end
     local interval_setting = math.max(0, math.floor(to_number(config.ProgressIntervalSeconds)))
     if interval_setting <= 0 then
         return
@@ -1333,6 +1343,9 @@ local function enqueue_event(event)
 end
 
 local function capture_damage(damage_param)
+    if config.EnableDPSRecording == false then
+        return
+    end
     -- Only unwrap the temporary hook parameter and copy its fields here.
     -- Do not call IsValid, Find*, StaticFindObject, or any UFunction.
     local result = unwrap(damage_param)
@@ -1377,6 +1390,9 @@ local function capture_damage(damage_param)
 end
 
 local function capture_death(dead_param)
+    if config.EnableDPSRecording == false then
+        return
+    end
     local result = unwrap(dead_param)
     if result == nil then
         return
@@ -1390,6 +1406,9 @@ local function capture_death(dead_param)
 end
 
 local function capture_captured(...)
+    if config.EnableDPSRecording == false then
+        return
+    end
     local candidates = {}
     for index = 1, select("#", ...) do
         local candidate = unwrap(select(index, ...))
@@ -1533,7 +1552,11 @@ local function register_hooks()
 
     if hooks.damage and hooks.death then
         log(string.format(
-            "loaded v2.8; batched private recipient arrays; central capture plus fallbacks; captured_hooks=%d",
+            "loaded v3.0.0; dps=%s progress=%s details=%s comments=%s; captured_hooks=%d",
+            tostring(config.EnableDPSRecording ~= false),
+            tostring(config.EnableProgressReports == true),
+            tostring(config.EnableTeamDetails == true),
+            tostring(config.EnableFunComments ~= false),
             hooks.captured_count
         ))
     else
@@ -1549,6 +1572,7 @@ end
 
 if rawget(_G, "__BOSS_DPS_TEST") == true then
     _G.BossDPSBroadcastTestApi = {
+        config = config,
         metrics = metrics,
         sessions = sessions,
         queue_size = queue_size,

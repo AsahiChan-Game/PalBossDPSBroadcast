@@ -1,68 +1,141 @@
-# BossDPSBroadcast v2.8
+# PalBossDPSBroadcast v3.0.0
 
-Palworld 1.0 专用服务器 UE4SS Lua Boss 团队伤害统计插件。
+适用于 Palworld 1.0 专用服务器的 UE4SS Lua Boss 伤害统计模组。
 
-## 当前功能
+服务端自动统计 Boss 战中的团队伤害、玩家综合伤害、占比和 DPS，并通过游戏聊天窗口向本场实际参与者发送结算。客户端无需安装。
 
-- Boss 第一次受到可归属给玩家的 `ActualDamage` 时自动开始。
-- 玩家帕鲁的伤害归属训练家，同时按每只帕鲁个体单独记录；坐骑技能优先沿 `DamageCauser` 的 `Owner/Instigator` 链识别实际帕鲁，玩家武器仍归玩家角色。
-- 每个 Boss 实例独立统计；同一房间的多个 Boss 不会串伤害。
-- 击杀、捕捉和 60 秒无伤害均可结束会话；1.0 以统一的 `PalUtility:PalCaptureSuccess` 为主要捕捉入口，并保留地下城、场景锁定战、Raid、鲸皇及旧路径作为兼容监听，可从多个回调参数位置匹配被捕捉 Boss。
-- 每 10 秒发送实时战况：累计伤害、最近窗口当前 DPS、个人累计占比和个人当前 DPS；达到爆发、百万伤害、输出翻倍或高占比等条件时额外穿插趣味点评，普通窗口不刷点评。
-- 趣味点评使用实时模板数据，可动态带入公会名、玩家名、帕鲁昵称和 Boss 名；点评脚本不再硬编码服务器公会名。
-- 结算包含团队伤害/团队 DPS、最高伤害玩家角色、最高伤害帕鲁和玩家综合排名，并且一定附带一条按秒杀、百万伤害、捕捉、失败等结果生成的趣味点评。
-- 击杀结算首行使用聊天窗口醒目播报：最后一击玩家（或“训练家 的 帕鲁昵称”）、Boss 名、用时、团队 DPS 和团队伤害；仍只发送给本场贡献者。
-- 多队参与时显示最高伤害队伍；只有一个队伍时直接以队伍名作为结算标题，不重复播报“最高伤害队伍”。
-- 公共结算只发给本场贡献者；随后按队伍定向发送“队内私报”，列出该队每个玩家角色和每只帕鲁的伤害、队内占比和 DPS，其他队伍看不到。
-- 帕鲁显示名优先使用玩家自定义昵称；若昵称不同于物种名，显示为 `昵称（物种中文名）`。
-- 玩家、公会、Boss 和帕鲁名称统一进行严格 UTF-8 清理，并按完整 Unicode 字符截断，长中文昵称不会再因截断半个字符导致整条消息发送失败。
-- Boss 名优先使用游戏本地化数据库和中文覆盖表，绝不显示完整 `/Game/...` UObject 路径。
-- 所有游戏内消息只发给本场造成过有效伤害的玩家；旁观者和其他在线玩家不会收到。
-- 收件人按一次调用中的 `TArray<FGuid>` 批量传入；参与人数不会再导致同一行重复广播，也不会因空数组而误发到公屏。
+## 默认效果
 
-## 统计口径
+公开版默认采用低打扰模式。一场三人 Boss 战只发送四行：
 
-- 团队总伤害：本场所有已归属 `ActualDamage` 的总和。
-- 玩家综合伤害：玩家本人伤害加该玩家所有帕鲁伤害。
-- 玩家角色伤害：只统计玩家本人武器/技能伤害。
-- 帕鲁伤害：按帕鲁个体分别统计，再归属训练家。
-- 伤害来源优先级：`DamageCauser`、网络归属对象、伤害信息中的攻击者、顶层攻击者；技能实体只沿有限层数的 `Owner/Instigator` 链解析，避免把玩家武器误判为坐骑帕鲁。
-- 队伍伤害：按 `PlayerState.GuildBelongTo` 聚合；无公会时按单人小队处理。
-- 当前 DPS：最近一次 10 秒播报窗口内的伤害除以实际窗口秒数。
-- 最终 DPS：整场累计伤害除以整场持续秒数。
-- 并列规则：伤害相同时，有效命中次数多者优先，再按显示名稳定排序。
+```text
+[BossDPS] 击杀播报：玩家A 的 帕鲁昵称 击败了 Boss名称｜用时 104秒｜团队DPS 8,185｜团队伤害 851,258｜3人
+[BossDPS] MVP #1 玩家A｜伤害 600,904｜70.6%｜DPS 5,778
+[BossDPS] #2 玩家B｜伤害 243,426｜28.6%｜DPS 2,341
+[BossDPS] #3 玩家C｜伤害 6,928｜0.8%｜DPS 67
+```
 
-## 多 Boss 与手动命令设计
+默认关闭开始提示、10 秒实时播报、趣味点评、角色/帕鲁奖项和逐只帕鲁明细。这些组件都可以在配置中独立开启。
 
-当前版本按 Boss 实例分别统计和结算。1.0 服务端二进制存在 `RaidBossAreaInstanceId`、`DungeonInstanceId`、`OnRaidBossBattleStart`、`OnRaidBossBattleFinish` 等可用于遭遇战分组的反射名称，但尚未确认完整类路径和运行时参数，因此没有用时间窗口强行合并，避免把地图上另一队的战斗混入。
+## 功能
 
-`!DPS` 手动开关可通过当前服务器已确认加载的 `/Script/Pal.PalPlayerController:EnterChat_Receive` 读取 `FPalChatMessage` 实现，而且 Controller 可直接确定发起玩家。推荐后续语义：发起者第一次输入建立房间会话；其首个 Boss 命中作为种子；攻击该 Boss 的玩家加入会话；已加入玩家攻击的新 Boss 并入同一会话；只有发起者再次输入可结束。该功能尚未进入 v2.8。服务器现有 `AdminCommands` 同样占用 `!` 前缀，因此实现前还需处理命令注册冲突。
+- Boss 首次受到可归属给玩家的有效伤害时自动开始统计。
+- 每个 Boss 实例独立记录，同一房间的多个 Boss 不会串数据。
+- 支持击杀、捕捉和长时间无伤害三种结算路径。
+- 玩家本人和其所有帕鲁伤害合并为玩家综合排名。
+- 内部仍按玩家角色和每只帕鲁分别记录，可选显示详细奖项和队内明细。
+- 坐骑技能优先归属实际帕鲁；玩家武器伤害归属玩家角色。
+- 帕鲁名称优先使用玩家自定义昵称。
+- Boss 名优先使用游戏本地化名称，不显示冗长的 `/Game/...` 对象路径。
+- 只向本场造成过伤害的玩家发送消息，旁观者和其他在线玩家不会收到。
+- 所有收件人通过一个 `TArray<FGuid>` 批量发送，同一行不会按参与人数重复。
+- 有界事件队列和游戏线程消息泵避免在原生伤害回调中调用 UObject/UFunction。
 
-## 安全结构
+## 环境要求
 
-伤害、死亡和捕捉钩子只复制临时事件字段，不执行 UObject/UFunction 查询或聊天发送。事件进入有界 FIFO 后，通过 `ExecuteInGameThread` 在游戏线程分批处理。聊天使用 `ExecuteInGameThreadWithDelay` 串行泵送，并通过 `SendSystemToPlayerChat` 只发送给贡献者 UID 快照。
+- Windows Palworld Dedicated Server 1.0
+- UE4SS 3.x
+- 服务端文件访问权限
 
-默认最多排队 8192 条伤害事件，每批最多处理 256 条。队列满时只丢弃额外伤害，死亡/捕捉结束事件仍保留。
+Palworld 或 UE4SS 更新后，反射函数名称可能变化。更新游戏前建议备份当前可用版本。
+
+## 安装
+
+1. 停止专用服务器。
+2. 安装并确认 UE4SS 可以正常加载 Lua 模组。
+3. 下载 Release 压缩包并解压。
+4. 将整个 `BossDPSBroadcast` 文件夹复制到：
+
+   ```text
+   PalServer/Pal/Binaries/Win64/ue4ss/Mods/BossDPSBroadcast
+   ```
+
+5. 确认目录结构如下：
+
+   ```text
+   BossDPSBroadcast/
+   ├─ enabled.txt
+   └─ Scripts/
+      ├─ main.lua
+      ├─ config.lua
+      └─ commentary.lua
+   ```
+
+6. 启动服务器，在 `ue4ss/UE4SS.log` 中搜索：
+
+   ```text
+   [BossDPSBroadcast] loaded v3.0.0
+   ```
+
+更新旧版本时，先备份自己的 `Scripts/config.lua`，再覆盖模组文件并重新应用配置。
 
 ## 配置
 
-配置文件为 `Scripts/config.lua`：
+编辑 `BossDPSBroadcast/Scripts/config.lua`，保存后重启服务器一次。
 
-- `ProgressIntervalSeconds`：实时战况间隔，默认 10 秒；设为 0 可关闭。
-- `ProgressMaxRows`：实时战况最多展开人数，默认 4。
-- `MaxResultRows`：最终排名最多展开人数。
-- `TeamDetailMaxRows`：每个队伍私报最多展开的玩家角色/帕鲁来源数，默认 12。
-- `EnableFunComments`：是否启用趣味点评；10 秒点评仅在触发阈值时出现，最终点评始终出现。
-- `MessageIntervalMilliseconds`：消息行间隔，默认 1000 毫秒。
-- `InactivityTimeoutSeconds`：无伤害自动结束时间，默认 60 秒。
-- `CleanupIntervalSeconds`：超时检查间隔，默认 10 秒，因此实际自动结算约在 60–70 秒发生。
-- `BossNameOverrides`、`PalNameOverrides`：中文名覆盖表。
+| 配置项 | 默认值 | 作用 |
+|---|---:|---|
+| `EnableDPSRecording` | `true` | 总开关；关闭后不记录也不发送任何战报 |
+| `BroadcastStart` | `false` | 首次有效命中时发送开始提示 |
+| `EnableProgressReports` | `false` | 发送周期性实时战况 |
+| `ProgressIntervalSeconds` | `10` | 实时战况间隔秒数 |
+| `ProgressMaxRows` | `4` | 实时战况最多显示的玩家数 |
+| `EnableFunComments` | `false` | 开启阈值点评和结算点评 |
+| `EnableDetailedAwards` | `false` | 显示最高队伍、玩家角色和帕鲁奖项 |
+| `EnableTeamDetails` | `false` | 向队内发送玩家角色和逐只帕鲁明细 |
+| `TeamDetailMaxRows` | `12` | 队内明细最大行数 |
+| `MarkTopAsMVP` | `true` | 将第一名标记为 `MVP #1` |
+| `MaxResultRows` | `10` | 最终综合排名最大行数 |
+| `ShowDPS` | `true` | 在最终排名中显示个人 DPS |
+| `InactivityTimeoutSeconds` | `60` | 无伤害多久后结束未完成战斗 |
+| `CleanupIntervalSeconds` | `10` | 超时检查间隔 |
+| `MessageIntervalMilliseconds` | `1000` | 消息行之间的发送间隔 |
 
-## 离线验证
+完整示例和预设见 [配置说明](docs/CONFIGURATION.md)。
 
-```powershell
-cd "C:\Users\Administrator\Documents\帕鲁服务器\BossDPSBroadcast\tests"
-.\run_all.ps1
+## 统计口径
+
+- 团队伤害：本场所有已归属 `ActualDamage` 的总和。
+- 玩家综合伤害：玩家角色伤害加该玩家所有帕鲁伤害。
+- 当前 DPS：最近一次实时播报窗口的伤害除以实际窗口时长。
+- 最终 DPS：整场累计伤害除以战斗持续时间。
+- 并列时按有效命中次数排序，再按显示名稳定排序。
+- 多 Boss 按实际 Actor 实例分别统计，不以时间窗口强制合并。
+
+## 常见问题
+
+### 完全没有战报
+
+检查 `enabled.txt` 是否存在、`EnableDPSRecording` 是否为 `true`，并在 `UE4SS.log` 中确认出现 `loaded v3.0.0`。
+
+### 别人的 Boss 战也发给我，或三个人重复三遍
+
+这是旧版将单个 `FGuid` 错当成收件人数组导致的问题。v3.0.0 使用一次调用中的完整 `TArray<FGuid>`。确认日志加载的是 v3.0.0，而不是旧版本。
+
+### 捕捉后不立即结算
+
+确认日志中出现：
+
+```text
+capture completion hook=/Script/Pal.PalUtility:PalCaptureSuccess
 ```
 
-测试覆盖 Lua 解析、UTF-8、危险 API、线程约束、临时参数生命周期、参与者/队伍隔离、击杀/捕捉/超时、多 Boss、滚动 DPS、趣味点评、队伍私报、坐骑技能与玩家武器分流、队伍/玩家/帕鲁奖项、昵称优先级和 10,000 次伤害压力。测试脚本还要求 Lua 完整运行到成功标记，避免解释器返回码掩盖断言失败。
+未识别的特殊捕捉流程仍会由无伤害超时兜底。
+
+### 聊天窗口信息太多
+
+使用默认配置，或关闭 `BroadcastStart`、`EnableProgressReports`、`EnableFunComments`、`EnableDetailedAwards` 和 `EnableTeamDetails`。
+
+## 测试
+
+离线测试需要 Node.js/npm，测试过程不会连接或重启 PalServer：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\tests\run_all.ps1
+```
+
+覆盖范围见 [测试说明](docs/TESTING.md)。
+
+## 许可与免责声明
+
+项目采用 [MIT License](LICENSE)。本项目是非官方社区模组，与 Pocketpair 或 UE4SS 项目无隶属关系。使用服务端模组前请备份存档，并遵守服务器规则及相关软件许可。

@@ -1,26 +1,36 @@
 local config = {}
 
+-- Master switch for all boss damage recording and chat reports.
+-- Changing this setting requires a server restart.
+config.EnableDPSRecording = true
+
 -- Prefix used for every participant-only system chat message.
 config.MessagePrefix = "[BossDPS]"
 
--- Announce as soon as the first tracked hit starts a boss session.
-config.BroadcastStart = true
+-- Optional components. Compact, low-noise output is the public default.
+-- Change a switch, then restart the server once to apply it.
+config.BroadcastStart = false
+config.EnableProgressReports = false
+config.EnableDetailedAwards = false
+config.EnableTeamDetails = false
+config.MarkTopAsMVP = true
 
 -- Maximum number of contributors shown in the final ranking.
-config.MaxResultRows = 20
+config.MaxResultRows = 10
 
--- Publish a compact live report to participants every N seconds.
+-- When EnableProgressReports is true, publish a live report every N seconds.
 -- Current DPS is damage dealt inside the latest report window divided by
 -- the actual window duration. Set to 0 to disable live reports.
 config.ProgressIntervalSeconds = 10
 config.ProgressMaxRows = 4
 
--- Maximum player-character/Pal source rows in each team-only final detail.
+-- Maximum player-character/Pal source rows when EnableTeamDetails is true.
 config.TeamDetailMaxRows = 12
 
 -- Fun battle comments: progress comments only appear when a threshold is met;
--- every final result always receives one comment.
-config.EnableFunComments = true
+-- every final result receives one comment when enabled. Changing this setting
+-- requires a server restart.
+config.EnableFunComments = false
 
 -- Delay between result lines to avoid flooding the chat feed.
 config.MessageIntervalMilliseconds = 1000
