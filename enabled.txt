@@ -1,1 +1,1 @@
-This marker file enables the Lua mod in UE4SS 3.x.
+首次实机灰度前，请只在无人在线且已备份存档的维护窗口，将本文件重命名为 enabled.txt。
