@@ -5,7 +5,8 @@ local config = require("./config")
 local MOD = "[BossDPSBroadcast]"
 local unpack_args = table.unpack or unpack
 local sessions = {}
-local hooks = { damage = false, death = false }
+local session_addresses = {}
+local hooks = { damage = false, death = false, captured = false }
 
 -- Native damage hooks may run in the middle of an Unreal call. They must not
 -- call UFunctions or retain references to the temporary event struct. The
@@ -120,7 +121,12 @@ local function text_value(value)
         return ""
     end
 
-    local ok, result = safe_call(value, "ToString")
+    local ok, result = safe_call(value, "GetDisplayString")
+    if ok and result ~= nil then
+        value = result
+    end
+
+    ok, result = safe_call(value, "ToString")
     if ok and result ~= nil then
         value = result
     end
@@ -140,10 +146,24 @@ local function actor_full_name(actor)
     return ""
 end
 
+local function actor_address(actor)
+    local ok, address = safe_call(actor, "GetAddress")
+    address = ok and to_number(address) or 0
+    if address <= 0 then
+        return nil
+    end
+    return tostring(address)
+end
+
 local function actor_short_name(actor)
-    local ok, name = safe_call(actor, "GetName")
-    local text = ok and text_value(name) or actor_full_name(actor)
+    local full_name = actor_full_name(actor)
+    local text = string.match(full_name, "%.([^%.%s:]+)$") or ""
+    if text == "" then
+        local ok, name = safe_call(actor, "GetName")
+        text = ok and text_value(name) or full_name
+    end
     text = string.gsub(text, "_C_%d+$", "")
+    text = string.gsub(text, "_C$", "")
     text = string.gsub(text, "^BP_", "")
     return text ~= "" and text or "Boss"
 end
@@ -172,6 +192,19 @@ local function guid_key(value)
         return nil
     end
     return table.concat({ tostring(guid.A), tostring(guid.B), tostring(guid.C), tostring(guid.D) }, ":")
+end
+
+local function copy_guid(value)
+    local guid = guid_parts(value)
+    if guid == nil then
+        return nil
+    end
+    return {
+        A = to_number(guid.A),
+        B = to_number(guid.B),
+        C = to_number(guid.C),
+        D = to_number(guid.D),
+    }
 end
 
 local function get_pal_utility()
@@ -246,6 +279,26 @@ local function resolve_player_state(attacker, utility)
     return nil
 end
 
+local function resolve_damage_owner(attacker, utility)
+    local trainer_ok, trainer = safe_call(utility, "GetTrainerPlayer", attacker)
+    if trainer_ok and is_valid(trainer) then
+        local state = state_from_actor_property(trainer)
+        if state == nil then
+            local state_ok, utility_state = safe_call(utility, "GetPlayerState", trainer)
+            state = state_ok and player_uid(utility_state) ~= nil and utility_state or nil
+        end
+        if state ~= nil then
+            return state, "pal"
+        end
+    end
+
+    local state = resolve_player_state(attacker, utility)
+    if state ~= nil then
+        return state, "player"
+    end
+    return nil, nil
+end
+
 local function actor_name_matches_boss_pattern(actor)
     local lower_name = string.lower(actor_full_name(actor))
     if lower_name == "" then
@@ -262,6 +315,64 @@ end
 local function actor_is_player_owned(actor, utility)
     local ok, trainer = safe_call(utility, "GetTrainerPlayer", actor)
     return ok and is_valid(trainer)
+end
+
+local function normalized_boss_id(value)
+    local text = text_value(value)
+    text = string.match(text, "%.([^%.%s:]+)$") or text
+    text = string.gsub(text, "_C_%d+$", "")
+    text = string.gsub(text, "_C$", "")
+    text = string.gsub(text, "^BP_", "")
+    text = string.gsub(text, "^BOSS_", "")
+    return text
+end
+
+local function boss_display_name(actor, utility, short_name)
+    local character_id
+    local id_ok, id_value = safe_call(utility, "GetCharacterIDFromCharacter", actor)
+    if id_ok then
+        character_id = normalized_boss_id(id_value)
+    end
+
+    local overrides = config.BossNameOverrides or {}
+    local candidates = { character_id, normalized_boss_id(short_name), short_name }
+    for _, candidate in ipairs(candidates) do
+        if candidate ~= nil and candidate ~= "" then
+            local override = overrides[candidate]
+            if override ~= nil and tostring(override) ~= "" then
+                return tostring(override)
+            end
+            local without_suffix = string.gsub(candidate, "_BOSS$", "")
+            override = overrides[without_suffix]
+            if override ~= nil and tostring(override) ~= "" then
+                return tostring(override)
+            end
+        end
+    end
+
+    -- This lookup runs once, on the game thread, when a session starts. The
+    -- out-table matches UE4SS handling for FString/FText out parameters.
+    if character_id ~= nil and character_id ~= "" then
+        local world = find_world_context()
+        local database_ok, database = false, nil
+        if world ~= nil then
+            database_ok, database = safe_call(utility, "GetDatabaseCharacterParameter", world)
+        end
+        if database_ok and is_valid(database) then
+            local out_text = {}
+            local localized_ok = safe_call(database, "GetLocalizedCharacterName", id_value, out_text)
+            if localized_ok then
+                local localized = text_value(out_text.OutText)
+                if localized ~= "" and string.find(localized, "/Game/", 1, true) == nil then
+                    return localized
+                end
+            end
+        end
+    end
+
+    -- A short internal id is preferable to leaking the full UObject path if
+    -- this Pal has no localized name on the dedicated server.
+    return normalized_boss_id(short_name)
 end
 
 local function get_boss_info(actor, utility)
@@ -291,34 +402,129 @@ local function get_boss_info(actor, utility)
         return nil
     end
     local short_name = actor_short_name(actor)
-    local display_name = config.BossNameOverrides and config.BossNameOverrides[short_name] or nil
-    if display_name == nil or tostring(display_name) == "" then
-        display_name = short_name
-    end
-    return { key = full_name, name = tostring(display_name) }
+    local display_name = boss_display_name(actor, utility, short_name)
+    return {
+        key = full_name,
+        address = actor_address(actor),
+        name = tostring(display_name),
+    }
 end
 
-local function send_public_message(message)
+local function clean_label(value, fallback)
+    local label = text_value(value)
+    label = string.gsub(label, "[\r\n]+", " ")
+    if label == "" then
+        label = tostring(fallback or "")
+    end
+    if #label > 48 then
+        label = string.sub(label, 1, 48)
+    end
+    return label
+end
+
+local function localized_character_name(character_id, utility, fallback)
+    local normalized = normalized_boss_id(character_id)
+    local override = (config.PalNameOverrides or {})[normalized]
+    if override ~= nil and tostring(override) ~= "" then
+        return clean_label(override, fallback)
+    end
+
+    local world = find_world_context()
+    if world ~= nil then
+        local database_ok, database = safe_call(utility, "GetDatabaseCharacterParameter", world)
+        if database_ok and is_valid(database) then
+            local out_text = {}
+            local localized_ok = safe_call(database, "GetLocalizedCharacterName", character_id, out_text)
+            if localized_ok then
+                local localized = text_value(
+                    out_text.OutText or out_text.outText or out_text.ReturnValue
+                )
+                if localized ~= "" and string.find(localized, "/Game/", 1, true) == nil then
+                    return clean_label(localized, fallback)
+                end
+            end
+        end
+    end
+    return clean_label(normalized, fallback)
+end
+
+local function pal_source_info(actor, utility)
+    local component_ok, component = safe_property(actor, "CharacterParameterComponent")
+    local individual_ok, individual = false, nil
+    if component_ok and is_valid(component) then
+        individual_ok, individual = safe_property(component, "IndividualParameter")
+    end
+
+    local source_key = actor_address(actor) or actor_full_name(actor)
+    local character_id = actor_short_name(actor)
+    local nickname = ""
+    if individual_ok and is_valid(individual) then
+        source_key = actor_address(individual) or source_key
+        local id_ok, id_value = safe_call(individual, "GetCharacterID")
+        if id_ok and text_value(id_value) ~= "" then
+            character_id = id_value
+        end
+        local out_name = {}
+        local nickname_ok = safe_call(individual, "GetNickname", out_name)
+        if nickname_ok then
+            nickname = clean_label(
+                out_name.outName or out_name.OutName or out_name.OutText or out_name.ReturnValue,
+                ""
+            )
+        end
+    end
+
+    local species = localized_character_name(character_id, utility, actor_short_name(actor))
+    local display = species
+    if nickname ~= "" and nickname ~= species then
+        display = string.format("%s（%s）", nickname, species)
+    end
+    return tostring(source_key or display), display, species, nickname
+end
+
+local function player_team_info(player_state, uid, fallback_name)
+    local guild_ok, guild = safe_property(player_state, "GuildBelongTo")
+    if guild_ok and is_valid(guild) then
+        local guild_key = actor_address(guild)
+        local name_ok, guild_name = safe_property(guild, "GuildName")
+        guild_name = name_ok and clean_label(guild_name, "") or ""
+        if guild_name == "" then
+            local call_ok, call_name = safe_call(guild, "GetGuildName")
+            guild_name = call_ok and clean_label(call_name, "") or ""
+        end
+        if guild_key ~= nil then
+            return "guild:" .. guild_key, guild_name ~= "" and guild_name or "未命名公会"
+        end
+    end
+    return "solo:" .. tostring(guid_key(uid)), tostring(fallback_name) .. "的小队"
+end
+
+local function send_participant_message(message, recipients)
     local utility = get_pal_utility()
     local world = find_world_context()
     if utility == nil or world == nil then
-        log("broadcast skipped: PalUtility or PalGameStateInGame unavailable")
+        log("participant message skipped: PalUtility or PalGameStateInGame unavailable")
         return false
     end
 
-    -- One server-wide announce is safer than one ProcessEvent call per player.
-    local ok, result = safe_call(utility, "SendSystemAnnounce", world, tostring(message))
-    if not ok then
-        log("broadcast failed: " .. tostring(result))
-        return false
+    local sent = 0
+    for _, receiver_uid in ipairs(recipients or {}) do
+        local ok, result = safe_call(
+            utility, "SendSystemToPlayerChat", world, tostring(message), receiver_uid
+        )
+        if ok then
+            sent = sent + 1
+        else
+            log("participant message failed: " .. tostring(result))
+        end
     end
-    return true
+    return sent > 0
 end
 
-local function announce(message)
+local function announce(message, recipients)
     local text = tostring(config.MessagePrefix or "[BossDPS]") .. " " .. tostring(message)
-    if send_public_message(text) then
-        log("broadcast: " .. text)
+    if send_participant_message(text, recipients) then
+        log(string.format("participant message recipients=%d: %s", #(recipients or {}), text))
     end
 end
 
@@ -340,11 +546,44 @@ local function ranked_contributors(session)
     end
     table.sort(rows, function(a, b)
         if a.damage == b.damage then
+            if a.hits ~= b.hits then
+                return a.hits > b.hits
+            end
             return a.name < b.name
         end
         return a.damage > b.damage
     end)
     return rows
+end
+
+local function ranked_damage_entries(entries)
+    local rows = {}
+    for _, entry in pairs(entries or {}) do
+        if entry.damage > 0 then
+            rows[#rows + 1] = entry
+        end
+    end
+    table.sort(rows, function(a, b)
+        if a.damage == b.damage then
+            if (a.hits or 0) ~= (b.hits or 0) then
+                return (a.hits or 0) > (b.hits or 0)
+            end
+            return tostring(a.name) < tostring(b.name)
+        end
+        return a.damage > b.damage
+    end)
+    return rows
+end
+
+local function session_recipients(session)
+    local recipients = {}
+    for _, entry in pairs(session.contributors) do
+        local uid = copy_guid(entry.uid)
+        if uid ~= nil then
+            recipients[#recipients + 1] = uid
+        end
+    end
+    return recipients
 end
 
 local run_message_pump
@@ -371,7 +610,7 @@ run_message_pump = function()
     local message = pending_messages[message_head]
     pending_messages[message_head] = nil
     message_head = message_head + 1
-    local sent, send_err = pcall(announce, message)
+    local sent, send_err = pcall(announce, message.text, message.recipients)
     if not sent then
         metrics.errors = metrics.errors + 1
         log("delayed broadcast error: " .. tostring(send_err))
@@ -387,10 +626,16 @@ run_message_pump = function()
     end
 end
 
-local function queue_messages(messages)
+local function queue_messages(messages, recipients)
+    if #(recipients or {}) == 0 then
+        return
+    end
     for _, message in ipairs(messages) do
         message_tail = message_tail + 1
-        pending_messages[message_tail] = message
+        pending_messages[message_tail] = {
+            text = tostring(message),
+            recipients = recipients,
+        }
     end
     if not message_pump_running and message_head <= message_tail then
         message_pump_running = true
@@ -404,27 +649,86 @@ local function finish_session(session, reason)
     end
     session.finished = true
     sessions[session.key] = nil
+    if session.address ~= nil then
+        session_addresses[session.address] = nil
+    end
 
     local duration = math.max(1, os.time() - session.started_at)
     local rows = ranked_contributors(session)
+    local teams = ranked_damage_entries(session.teams)
+    local pals = ranked_damage_entries(session.pal_sources)
+    local recipients = session_recipients(session)
     local messages = {}
-    local reason_text = reason == "defeated" and "已击败" or "统计结束（长时间无伤害）"
+    local reason_text
+    if reason == "defeated" then
+        reason_text = "已击败"
+    elseif reason == "captured" then
+        reason_text = "已捕捉"
+    else
+        reason_text = "统计结束（长时间无伤害）"
+    end
     messages[#messages + 1] = string.format(
-        "%s %s！团队伤害 %s，用时 %d 秒，参与者 %d 人",
+        "%s %s！团队伤害 %s｜团队DPS %s｜用时 %d秒｜%d人",
         session.name,
         reason_text,
         format_integer(session.total_damage),
+        format_integer(session.total_damage / duration),
         duration,
         #rows
     )
+
+    if #teams > 0 then
+        local team = teams[1]
+        local team_percent = session.total_damage > 0 and team.damage * 100 / session.total_damage or 0
+        messages[#messages + 1] = string.format(
+            "最高伤害队伍：%s｜伤害 %s｜%.1f%%｜DPS %s",
+            team.name,
+            format_integer(team.damage),
+            team_percent,
+            format_integer(team.damage / duration)
+        )
+    end
+
+
+    local direct_players = {}
+    for _, row in ipairs(rows) do
+        if row.direct_damage > 0 then
+            direct_players[#direct_players + 1] = {
+                name = row.name,
+                damage = row.direct_damage,
+                hits = row.direct_hits,
+            }
+        end
+    end
+    direct_players = ranked_damage_entries(direct_players)
+    if #direct_players > 0 then
+        local direct = direct_players[1]
+        messages[#messages + 1] = string.format(
+            "最高伤害玩家角色：%s｜伤害 %s｜DPS %s",
+            direct.name,
+            format_integer(direct.damage),
+            format_integer(direct.damage / duration)
+        )
+    end
+
+    if #pals > 0 then
+        local pal = pals[1]
+        messages[#messages + 1] = string.format(
+            "最高伤害帕鲁：%s｜训练家 %s｜伤害 %s｜DPS %s",
+            pal.name,
+            pal.owner_name,
+            format_integer(pal.damage),
+            format_integer(pal.damage / duration)
+        )
+    end
 
     local max_rows = math.max(1, math.floor(to_number(config.MaxResultRows)))
     for index = 1, math.min(max_rows, #rows) do
         local row = rows[index]
         local percent = session.total_damage > 0 and row.damage * 100 / session.total_damage or 0
         local line = string.format(
-            "#%d %s｜%s｜伤害 %s｜%.1f%%",
-            index, session.name, row.name, format_integer(row.damage), percent
+            "#%d %s｜伤害 %s｜%.1f%%",
+            index, row.name, format_integer(row.damage), percent
         )
         if config.ShowDPS == true then
             line = line .. string.format("｜DPS %s", format_integer(row.damage / duration))
@@ -439,29 +743,35 @@ local function finish_session(session, reason)
         "session finished reason=%s boss=%s damage=%s duration=%d contributors=%d",
         tostring(reason), session.name, format_integer(session.total_damage), duration, #rows
     ))
-    queue_messages(messages)
+    queue_messages(messages, recipients)
 end
 
 local function start_session(boss_info)
     local now = os.time()
     local session = {
         key = boss_info.key,
+        address = boss_info.address,
         name = boss_info.name,
         started_at = now,
         last_damage_at = now,
+        last_progress_at = now,
         total_damage = 0,
+        progress_damage = 0,
         contributors = {},
+        teams = {},
+        pal_sources = {},
+        start_announced = false,
         finished = false,
     }
     sessions[session.key] = session
-    if config.BroadcastStart ~= false then
-        announce(string.format("开始统计：%s 已进入战斗", session.name))
+    if session.address ~= nil then
+        session_addresses[session.address] = session
     end
     log("session started boss=" .. session.name .. " key=" .. session.key)
     return session
 end
 
-local function record_damage(session, player_state, damage)
+local function record_damage(session, player_state, damage, source_kind, source_actor, utility)
     local uid = player_uid(player_state)
     local key = guid_key(uid)
     if key == nil then
@@ -470,15 +780,67 @@ local function record_damage(session, player_state, damage)
 
     local entry = session.contributors[key]
     if entry == nil then
-        entry = { name = player_name(player_state), damage = 0, hits = 0 }
+        entry = {
+            uid = copy_guid(uid),
+            name = player_name(player_state),
+            damage = 0,
+            progress_damage = 0,
+            hits = 0,
+            direct_damage = 0,
+            direct_hits = 0,
+        }
+        entry.team_key, entry.team_name = player_team_info(player_state, uid, entry.name)
         session.contributors[key] = entry
     else
         entry.name = player_name(player_state)
     end
     entry.damage = entry.damage + damage
+    entry.progress_damage = entry.progress_damage + damage
     entry.hits = entry.hits + 1
     session.total_damage = session.total_damage + damage
+    session.progress_damage = session.progress_damage + damage
     session.last_damage_at = os.time()
+
+    local team = session.teams[entry.team_key]
+    if team == nil then
+        team = { name = entry.team_name, damage = 0, hits = 0 }
+        session.teams[entry.team_key] = team
+    end
+    team.name = entry.team_name
+    team.damage = team.damage + damage
+    team.hits = team.hits + 1
+
+    if source_kind == "pal" then
+        local source_key, display_name = pal_source_info(source_actor, utility)
+        local pal = session.pal_sources[source_key]
+        if pal == nil then
+            pal = {
+                name = display_name,
+                owner_name = entry.name,
+                owner_uid_key = key,
+                damage = 0,
+                hits = 0,
+            }
+            session.pal_sources[source_key] = pal
+        end
+        pal.name = display_name
+        pal.owner_name = entry.name
+        pal.damage = pal.damage + damage
+        pal.hits = pal.hits + 1
+    else
+        entry.direct_damage = entry.direct_damage + damage
+        entry.direct_hits = entry.direct_hits + 1
+    end
+
+    if session.start_announced ~= true then
+        session.start_announced = true
+        if config.BroadcastStart ~= false then
+            queue_messages(
+                { string.format("开始统计：%s 已进入战斗", session.name) },
+                session_recipients(session)
+            )
+        end
+    end
 
     if config.TraceDamage == true then
         log(string.format(
@@ -486,6 +848,61 @@ local function record_damage(session, player_state, damage)
             session.name, entry.name, format_integer(damage),
             format_integer(entry.damage), format_integer(session.total_damage)
         ))
+    end
+end
+
+local function publish_progress()
+    local interval_setting = math.max(0, math.floor(to_number(config.ProgressIntervalSeconds)))
+    if interval_setting <= 0 then
+        return
+    end
+
+    local now = os.time()
+    for _, session in pairs(sessions) do
+        if session.finished ~= true and session.total_damage > 0
+            and now - session.last_progress_at >= interval_setting then
+            local window = math.max(1, now - session.last_progress_at)
+            local rows = ranked_contributors(session)
+            local recipients = session_recipients(session)
+            local messages = {
+                string.format(
+                    "实时战况：%s｜总伤害 %s｜当前DPS %s",
+                    session.name,
+                    format_integer(session.total_damage),
+                    format_integer(session.progress_damage / window)
+                ),
+            }
+
+            local max_rows = math.max(1, math.floor(to_number(config.ProgressMaxRows)))
+            local compact = {}
+            for index = 1, math.min(max_rows, #rows) do
+                local row = rows[index]
+                local percent = session.total_damage > 0 and row.damage * 100 / session.total_damage or 0
+                compact[#compact + 1] = string.format(
+                    "#%d %s %s(%.1f%%/%sDPS)",
+                    index,
+                    row.name,
+                    format_integer(row.damage),
+                    percent,
+                    format_integer(row.progress_damage / window)
+                )
+            end
+            if #rows > max_rows then
+                compact[#compact + 1] = string.format("另有%d人", #rows - max_rows)
+            end
+            if #compact > 0 then
+                messages[#messages + 1] = "输出：" .. table.concat(compact, "｜")
+            end
+
+            if session.progress_damage > 0 then
+                queue_messages(messages, recipients)
+            end
+            session.last_progress_at = now
+            session.progress_damage = 0
+            for _, row in ipairs(rows) do
+                row.progress_damage = 0
+            end
+        end
     end
 end
 
@@ -500,17 +917,18 @@ local function process_damage_event(event)
         metrics.invalid = metrics.invalid + 1
         return
     end
-    local state = resolve_player_state(event.attacker, utility)
+    local state, source_kind = resolve_damage_owner(event.attacker, utility)
     if state == nil then
         return
     end
 
+    local address = actor_address(event.defender)
     local key = actor_full_name(event.defender)
     if key == "" then
         metrics.invalid = metrics.invalid + 1
         return
     end
-    local session = sessions[key]
+    local session = address ~= nil and session_addresses[address] or sessions[key]
     if session == nil then
         local boss_info = get_boss_info(event.defender, utility)
         if boss_info == nil then
@@ -518,18 +936,20 @@ local function process_damage_event(event)
         end
         session = start_session(boss_info)
     end
-    record_damage(session, state, event.damage)
+    record_damage(session, state, event.damage, source_kind, event.attacker, utility)
 end
 
-local function process_death_event(event)
-    if not is_valid(event.actor) then
-        metrics.invalid = metrics.invalid + 1
-        return
+local function process_finish_event(event)
+    -- GetAddress is a UE4SS wrapper operation and does not dereference the
+    -- UObject. It can still identify a session if capture invalidated the actor.
+    local address = actor_address(event.actor)
+    local session = address ~= nil and session_addresses[address] or nil
+    if session == nil and is_valid(event.actor) then
+        local key = actor_full_name(event.actor)
+        session = key ~= "" and sessions[key] or nil
     end
-    local key = actor_full_name(event.actor)
-    local session = key ~= "" and sessions[key] or nil
     if session ~= nil then
-        finish_session(session, "defeated")
+        finish_session(session, event.reason)
     end
 end
 
@@ -568,7 +988,7 @@ local function drain_events()
         if event.kind == "damage" then
             ok, err = pcall(process_damage_event, event)
         else
-            ok, err = pcall(process_death_event, event)
+            ok, err = pcall(process_finish_event, event)
         end
         if not ok then
             metrics.errors = metrics.errors + 1
@@ -636,7 +1056,14 @@ local function capture_death(dead_param)
         return result.SelfActor
     end)
     if ok and actor ~= nil then
-        enqueue_event({ kind = "death", actor = actor })
+        enqueue_event({ kind = "finish", reason = "defeated", actor = actor })
+    end
+end
+
+local function capture_captured(character_param)
+    local actor = unwrap(character_param)
+    if actor ~= nil then
+        enqueue_event({ kind = "finish", reason = "captured", actor = actor })
     end
 end
 
@@ -674,6 +1101,26 @@ local function schedule_cleanup()
     end
 end
 
+local function schedule_progress()
+    local seconds = math.max(0, math.floor(to_number(config.ProgressIntervalSeconds)))
+    if seconds <= 0 then
+        return
+    end
+    local ok, err = pcall(function()
+        LoopInGameThreadWithDelay(seconds * 1000, function()
+            local published, publish_err = pcall(publish_progress)
+            if not published then
+                metrics.errors = metrics.errors + 1
+                log("progress publishing error: " .. tostring(publish_err))
+            end
+        end)
+    end)
+    if not ok then
+        metrics.errors = metrics.errors + 1
+        log("progress scheduling failed: " .. tostring(err))
+    end
+end
+
 local function register_hooks()
     local damage_ok, damage_err = pcall(function()
         RegisterHook("/Script/Pal.PalEventNotify_Character:OnCharacterDamaged_ServerInternal", function(_, damage_result)
@@ -703,8 +1150,37 @@ local function register_hooks()
         log("death hook registration failed: " .. tostring(death_err))
     end
 
+    local capture_candidates = {
+        "/Script/Pal.PalCharacter:OnCaptured",
+        "/Script/Pal.PalCaptureJudgeObject:OnCaptureSuccess",
+    }
+    local capture_errors = {}
+    for _, capture_path in ipairs(capture_candidates) do
+        local captured_ok, captured_err = pcall(function()
+            RegisterHook(capture_path, function(_, captured_character, _capture_result)
+                local ok, err = pcall(capture_captured, captured_character)
+                if not ok then
+                    metrics.errors = metrics.errors + 1
+                    log("capture completion error: " .. tostring(err))
+                end
+            end)
+        end)
+        if captured_ok then
+            hooks.captured = true
+            log("capture completion hook=" .. capture_path)
+            break
+        end
+        capture_errors[#capture_errors + 1] = capture_path .. ": " .. tostring(captured_err)
+    end
+    if not hooks.captured then
+        log("capture hook registration failed: " .. table.concat(capture_errors, " | "))
+    end
+
     if hooks.damage and hooks.death then
-        log("loaded v2; hooks capture only, UObject work deferred to game thread")
+        log(string.format(
+            "loaded v2.1; hooks capture only, UObject work deferred to game thread; captured_hook=%s",
+            tostring(hooks.captured)
+        ))
     else
         log("disabled: one or more required hooks could not be registered")
     end
@@ -713,6 +1189,7 @@ end
 register_hooks()
 if hooks.damage and hooks.death then
     schedule_cleanup()
+    schedule_progress()
 end
 
 if rawget(_G, "__BOSS_DPS_TEST") == true then
@@ -722,5 +1199,6 @@ if rawget(_G, "__BOSS_DPS_TEST") == true then
         queue_size = queue_size,
         drain_events = drain_events,
         cleanup_sessions = cleanup_sessions,
+        publish_progress = publish_progress,
     }
 end
