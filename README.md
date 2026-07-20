@@ -1,4 +1,4 @@
-# BossDPSBroadcast v2.5
+# BossDPSBroadcast v2.6
 
 Palworld 1.0 专用服务器 UE4SS Lua Boss 团队伤害统计插件。
 
@@ -7,7 +7,7 @@ Palworld 1.0 专用服务器 UE4SS Lua Boss 团队伤害统计插件。
 - Boss 第一次受到可归属给玩家的 `ActualDamage` 时自动开始。
 - 玩家帕鲁的伤害归属训练家，同时按每只帕鲁个体单独记录；坐骑技能优先沿 `DamageCauser` 的 `Owner/Instigator` 链识别实际帕鲁，玩家武器仍归玩家角色。
 - 每个 Boss 实例独立统计；同一房间的多个 Boss 不会串伤害。
-- 击杀、捕捉和 300 秒无伤害均可结束会话；1.0 优先注册 `PalEventNotify_Character` 的三个服务端捕捉事件，同时保留旧 `PalCharacter/PalCaptureJudgeObject` 路径，并可从多个回调参数位置匹配被捕捉 Boss。
+- 击杀、捕捉和 60 秒无伤害均可结束会话；1.0 使用当前 Modding Kit 中真实的地下城、场景锁定战、Raid、鲸皇等捕捉监听类，同时保留旧 `PalCharacter/PalCaptureJudgeObject` 路径，并可从多个回调参数位置匹配被捕捉 Boss。
 - 每 10 秒发送实时战况：累计伤害、最近窗口当前 DPS、个人累计占比和个人当前 DPS；达到爆发、百万伤害、输出翻倍或高占比等条件时额外穿插趣味点评，普通窗口不刷点评。
 - 趣味点评使用实时模板数据，可动态带入公会名、玩家名、帕鲁昵称和 Boss 名；点评脚本不再硬编码服务器公会名。
 - 结算包含团队伤害/团队 DPS、最高伤害玩家角色、最高伤害帕鲁和玩家综合排名，并且一定附带一条按秒杀、百万伤害、捕捉、失败等结果生成的趣味点评。
@@ -35,7 +35,7 @@ Palworld 1.0 专用服务器 UE4SS Lua Boss 团队伤害统计插件。
 
 当前版本按 Boss 实例分别统计和结算。1.0 服务端二进制存在 `RaidBossAreaInstanceId`、`DungeonInstanceId`、`OnRaidBossBattleStart`、`OnRaidBossBattleFinish` 等可用于遭遇战分组的反射名称，但尚未确认完整类路径和运行时参数，因此没有用时间窗口强行合并，避免把地图上另一队的战斗混入。
 
-`!DPS` 手动开关可通过当前服务器已确认加载的 `/Script/Pal.PalPlayerController:EnterChat_Receive` 读取 `FPalChatMessage` 实现，而且 Controller 可直接确定发起玩家。推荐后续语义：发起者第一次输入建立房间会话；其首个 Boss 命中作为种子；攻击该 Boss 的玩家加入会话；已加入玩家攻击的新 Boss 并入同一会话；只有发起者再次输入可结束。该功能尚未进入 v2.5。服务器现有 `AdminCommands` 同样占用 `!` 前缀，因此实现前还需处理命令注册冲突。
+`!DPS` 手动开关可通过当前服务器已确认加载的 `/Script/Pal.PalPlayerController:EnterChat_Receive` 读取 `FPalChatMessage` 实现，而且 Controller 可直接确定发起玩家。推荐后续语义：发起者第一次输入建立房间会话；其首个 Boss 命中作为种子；攻击该 Boss 的玩家加入会话；已加入玩家攻击的新 Boss 并入同一会话；只有发起者再次输入可结束。该功能尚未进入 v2.6。服务器现有 `AdminCommands` 同样占用 `!` 前缀，因此实现前还需处理命令注册冲突。
 
 ## 安全结构
 
@@ -53,7 +53,8 @@ Palworld 1.0 专用服务器 UE4SS Lua Boss 团队伤害统计插件。
 - `TeamDetailMaxRows`：每个队伍私报最多展开的玩家角色/帕鲁来源数，默认 12。
 - `EnableFunComments`：是否启用趣味点评；10 秒点评仅在触发阈值时出现，最终点评始终出现。
 - `MessageIntervalMilliseconds`：消息行间隔，默认 1000 毫秒。
-- `InactivityTimeoutSeconds`：无伤害自动结束时间，默认 300 秒。
+- `InactivityTimeoutSeconds`：无伤害自动结束时间，默认 60 秒。
+- `CleanupIntervalSeconds`：超时检查间隔，默认 10 秒，因此实际自动结算约在 60–70 秒发生。
 - `BossNameOverrides`、`PalNameOverrides`：中文名覆盖表。
 
 ## 离线验证

@@ -27,8 +27,8 @@ config.MessageIntervalMilliseconds = 1000
 
 -- End and publish a partial session after this many seconds without damage.
 -- Set to 0 to disable inactivity cleanup.
-config.InactivityTimeoutSeconds = 300
-config.CleanupIntervalSeconds = 30
+config.InactivityTimeoutSeconds = 60
+config.CleanupIntervalSeconds = 10
 
 -- Include per-player DPS in addition to damage and percentage.
 config.ShowDPS = true

@@ -186,7 +186,7 @@ function RegisterHook(path, callback)
     local allowed = {
         ["/Script/Pal.PalEventNotify_Character:OnCharacterDamaged_ServerInternal"] = true,
         ["/Script/Pal.PalEventNotify_Character:OnCharacterDead_ServerInternal"] = true,
-        ["/Script/Pal.PalEventNotify_Character:OnCaptured_ServerInternal"] = true,
+        ["/Script/Pal.PalLevelObject_LockGimmickPalFight:OnPalCaptured"] = true,
     }
     if not allowed[path] then
         error("simulated Palworld 1.0: UFunction not found")
@@ -276,7 +276,7 @@ end
 
 local function captured(captured_actor, attacker)
     phase = "hook"
-    callbacks["/Script/Pal.PalEventNotify_Character:OnCaptured_ServerInternal"](
+    callbacks["/Script/Pal.PalLevelObject_LockGimmickPalFight:OnPalCaptured"](
         nil,
         hook_param(attacker),
         hook_param(captured_actor)
@@ -339,13 +339,13 @@ commentary_case({}, true)
 
 local damage_hook = callbacks["/Script/Pal.PalEventNotify_Character:OnCharacterDamaged_ServerInternal"]
 local death_hook = callbacks["/Script/Pal.PalEventNotify_Character:OnCharacterDead_ServerInternal"]
-local captured_hook = callbacks["/Script/Pal.PalEventNotify_Character:OnCaptured_ServerInternal"]
+local captured_hook = callbacks["/Script/Pal.PalLevelObject_LockGimmickPalFight:OnPalCaptured"]
 assert(damage_hook ~= nil, "damage hook was not registered")
 assert(death_hook ~= nil, "death hook was not registered")
 assert(captured_hook ~= nil, "capture hook was not registered")
 assert(#loop_tasks == 2, "cleanup and progress loops were not configured")
 local loop_delays = { [loop_tasks[1].delay] = true, [loop_tasks[2].delay] = true }
-assert(loop_delays[10000] and loop_delays[30000], "unexpected loop delays")
+assert(loop_tasks[1].delay == 10000 and loop_tasks[2].delay == 10000, "unexpected loop delays")
 
 -- Thread-affinity and event-struct lifetime: hook phase may only copy fields.
 local accesses_before_hook = object_accesses
@@ -549,7 +549,7 @@ assert(BossDPSBroadcastTestApi.metrics.invalid == invalid_before + 1, "stale act
 local timeout_boss = boss_actor("BP_RaidBoss_Timeout_C_11")
 damage(player_one, timeout_boss, 250)
 run_game_tasks()
-fake_time = fake_time + 301
+fake_time = fake_time + 61
 phase = "game"
 BossDPSBroadcastTestApi.cleanup_sessions()
 phase = "idle"

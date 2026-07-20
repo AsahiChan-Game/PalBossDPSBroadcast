@@ -1485,9 +1485,16 @@ local function register_hooks()
     end
 
     local capture_candidates = {
-        "/Script/Pal.PalEventNotify_Character:OnCaptured_ServerInternal",
-        "/Script/Pal.PalEventNotify_Character:OnCapturedBoss_ServerInternal",
-        "/Script/Pal.PalEventNotify_Character:OnCapturedCharacter_ServerInternal",
+        -- Palworld 1.0 Modding Kit owners and exact signatures. These are
+        -- dynamic-delegate listeners that ProcessEvent actually reaches on a
+        -- dedicated server; OnCaptureSuccess may be called through its native
+        -- _Implementation and can therefore be bypassed by UE4SS hooks.
+        "/Script/Pal.PalDungeonInstanceModel:OnCapturedBoss_ServerInternal",
+        "/Script/Pal.PalDungeonGimmickUnlockableDoor_DefeatCharacterOnSpawner:OnCapturedCharacter_ServerInternal",
+        "/Script/Pal.PalAICombatModule_KingWhale_Wild:OnCaptured_ServerInternal",
+        "/Script/Pal.PalLevelObject_LockGimmickPalFight:OnPalCaptured",
+        "/Script/Pal.PalRaidBossComponent:OnCapturePal",
+        "/Script/Pal.PalNegotiatorComponent:OnOwnerCaptured",
         "/Script/Pal.PalCharacter:OnCaptured",
         "/Script/Pal.PalCaptureJudgeObject:OnCaptureSuccess",
     }
@@ -1516,7 +1523,7 @@ local function register_hooks()
 
     if hooks.damage and hooks.death then
         log(string.format(
-            "loaded v2.5; hooks capture only, UObject work deferred to game thread; captured_hooks=%d",
+            "loaded v2.6; hooks capture only, UObject work deferred to game thread; captured_hooks=%d",
             hooks.captured_count
         ))
     else
