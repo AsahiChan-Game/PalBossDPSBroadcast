@@ -7,7 +7,7 @@ local MOD = "[BossDPSBroadcast]"
 local unpack_args = table.unpack or unpack
 local sessions = {}
 local session_addresses = {}
-local hooks = { damage = false, death = false, captured = false }
+local hooks = { damage = false, death = false, captured = false, captured_count = 0 }
 
 -- Native damage hooks may run in the middle of an Unreal call. They must not
 -- call UFunctions or retain references to the temporary event struct. The
@@ -1222,16 +1222,29 @@ local function process_damage_event(event)
 end
 
 local function process_finish_event(event)
-    -- GetAddress is a UE4SS wrapper operation and does not dereference the
-    -- UObject. It can still identify a session if capture invalidated the actor.
-    local address = actor_address(event.actor)
-    local session = address ~= nil and session_addresses[address] or nil
-    if session == nil and is_valid(event.actor) then
-        local key = actor_full_name(event.actor)
-        session = key ~= "" and sessions[key] or nil
+    local candidates = event.candidates or { event.actor }
+    local session = nil
+    for _, actor in ipairs(candidates) do
+        if actor ~= nil then
+            -- GetAddress is a UE4SS wrapper operation and does not dereference
+            -- the UObject. It can still identify a session after capture has
+            -- invalidated the actor. Different 1.0 capture events put the
+            -- captured character at different argument positions.
+            local address = actor_address(actor)
+            session = address ~= nil and session_addresses[address] or nil
+            if session == nil and is_valid(actor) then
+                local key = actor_full_name(actor)
+                session = key ~= "" and sessions[key] or nil
+            end
+            if session ~= nil then
+                break
+            end
+        end
     end
     if session ~= nil then
         finish_session(session, event.reason)
+    elseif event.reason == "captured" then
+        log(string.format("capture event did not match an active boss session; candidates=%d", #candidates))
     end
 end
 
@@ -1370,10 +1383,21 @@ local function capture_death(dead_param)
     end
 end
 
-local function capture_captured(character_param)
-    local actor = unwrap(character_param)
-    if actor ~= nil then
-        enqueue_event({ kind = "finish", reason = "captured", actor = actor })
+local function capture_captured(...)
+    local candidates = {}
+    for index = 1, select("#", ...) do
+        local candidate = unwrap(select(index, ...))
+        if candidate ~= nil then
+            candidates[#candidates + 1] = candidate
+        end
+    end
+    if #candidates > 0 then
+        enqueue_event({
+            kind = "finish",
+            reason = "captured",
+            actor = candidates[1],
+            candidates = candidates,
+        })
     end
 end
 
@@ -1461,14 +1485,17 @@ local function register_hooks()
     end
 
     local capture_candidates = {
+        "/Script/Pal.PalEventNotify_Character:OnCaptured_ServerInternal",
+        "/Script/Pal.PalEventNotify_Character:OnCapturedBoss_ServerInternal",
+        "/Script/Pal.PalEventNotify_Character:OnCapturedCharacter_ServerInternal",
         "/Script/Pal.PalCharacter:OnCaptured",
         "/Script/Pal.PalCaptureJudgeObject:OnCaptureSuccess",
     }
     local capture_errors = {}
     for _, capture_path in ipairs(capture_candidates) do
         local captured_ok, captured_err = pcall(function()
-            RegisterHook(capture_path, function(_, captured_character, _capture_result)
-                local ok, err = pcall(capture_captured, captured_character)
+            RegisterHook(capture_path, function(_, first, second, third, fourth)
+                local ok, err = pcall(capture_captured, first, second, third, fourth)
                 if not ok then
                     metrics.errors = metrics.errors + 1
                     log("capture completion error: " .. tostring(err))
@@ -1477,10 +1504,11 @@ local function register_hooks()
         end)
         if captured_ok then
             hooks.captured = true
+            hooks.captured_count = hooks.captured_count + 1
             log("capture completion hook=" .. capture_path)
-            break
+        else
+            capture_errors[#capture_errors + 1] = capture_path .. ": " .. tostring(captured_err)
         end
-        capture_errors[#capture_errors + 1] = capture_path .. ": " .. tostring(captured_err)
     end
     if not hooks.captured then
         log("capture hook registration failed: " .. table.concat(capture_errors, " | "))
@@ -1488,8 +1516,8 @@ local function register_hooks()
 
     if hooks.damage and hooks.death then
         log(string.format(
-            "loaded v2.4; hooks capture only, UObject work deferred to game thread; captured_hook=%s",
-            tostring(hooks.captured)
+            "loaded v2.5; hooks capture only, UObject work deferred to game thread; captured_hooks=%d",
+            hooks.captured_count
         ))
     else
         log("disabled: one or more required hooks could not be registered")

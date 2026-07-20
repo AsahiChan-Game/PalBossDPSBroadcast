@@ -183,7 +183,12 @@ end
 
 function RegisterHook(path, callback)
     assert(phase == "bootstrap", "RegisterHook must run during bootstrap")
-    if path == "/Script/Pal.PalCharacter:OnCaptured" then
+    local allowed = {
+        ["/Script/Pal.PalEventNotify_Character:OnCharacterDamaged_ServerInternal"] = true,
+        ["/Script/Pal.PalEventNotify_Character:OnCharacterDead_ServerInternal"] = true,
+        ["/Script/Pal.PalEventNotify_Character:OnCaptured_ServerInternal"] = true,
+    }
+    if not allowed[path] then
         error("simulated Palworld 1.0: UFunction not found")
     end
     callbacks[path] = callback
@@ -271,10 +276,10 @@ end
 
 local function captured(captured_actor, attacker)
     phase = "hook"
-    callbacks["/Script/Pal.PalCaptureJudgeObject:OnCaptureSuccess"](
+    callbacks["/Script/Pal.PalEventNotify_Character:OnCaptured_ServerInternal"](
         nil,
-        hook_param(captured_actor),
-        hook_param(attacker)
+        hook_param(attacker),
+        hook_param(captured_actor)
     )
     phase = "idle"
 end
@@ -334,7 +339,7 @@ commentary_case({}, true)
 
 local damage_hook = callbacks["/Script/Pal.PalEventNotify_Character:OnCharacterDamaged_ServerInternal"]
 local death_hook = callbacks["/Script/Pal.PalEventNotify_Character:OnCharacterDead_ServerInternal"]
-local captured_hook = callbacks["/Script/Pal.PalCaptureJudgeObject:OnCaptureSuccess"]
+local captured_hook = callbacks["/Script/Pal.PalEventNotify_Character:OnCaptured_ServerInternal"]
 assert(damage_hook ~= nil, "damage hook was not registered")
 assert(death_hook ~= nil, "death hook was not registered")
 assert(captured_hook ~= nil, "capture hook was not registered")
