@@ -246,13 +246,17 @@ local function hook_param(value)
     }
 end
 
-local function damage(attacker, defender, amount)
-    phase = "hook"
-    callbacks["/Script/Pal.PalEventNotify_Character:OnCharacterDamaged_ServerInternal"](nil, hook_param({
+local function damage(attacker, defender, amount, extra_fields)
+    local payload = {
         Attacker = attacker,
         Defender = defender,
         ActualDamage = amount,
-    }))
+    }
+    for key, value in pairs(extra_fields or {}) do
+        payload[key] = value
+    end
+    phase = "hook"
+    callbacks["/Script/Pal.PalEventNotify_Character:OnCharacterDamaged_ServerInternal"](nil, hook_param(payload))
     phase = "idle"
 end
 
@@ -314,8 +318,13 @@ assert(string.find(joined, "Bob｜伤害 400｜40.0%", 1, true) ~= nil, "Pal own
 assert(string.find(joined, "最高伤害队伍：红队｜伤害 600", 1, true) ~= nil, "team MVP missing")
 assert(string.find(joined, "最高伤害玩家角色：Alice｜伤害 600", 1, true) ~= nil, "player MVP missing")
 assert(string.find(joined, "最高伤害帕鲁：棉花糖（捣蛋猫）｜训练家 Bob｜伤害 400", 1, true) ~= nil, "Pal MVP or nickname priority missing")
-assert(#delivered == 7, "expected start, summary, three awards, and two ranking lines")
-assert(#delivered_by_uid[test_guid_key(uid_two)] == 6, "late participant received the start line")
+assert(string.find(joined, "战斗点评：", 1, true) ~= nil, "mandatory final comment missing")
+assert(string.find(joined, "队内私报：红队｜伤害 600", 1, true) ~= nil, "red team private detail missing")
+assert(string.find(joined, "Alice（玩家角色）｜伤害 600｜100.0%", 1, true) ~= nil)
+local bob_first_joined = table.concat(delivered_by_uid[test_guid_key(uid_two)], "\n")
+assert(string.find(bob_first_joined, "开始统计", 1, true) == nil, "late participant received the start line")
+assert(string.find(bob_first_joined, "队内私报：蓝队｜伤害 400", 1, true) ~= nil)
+assert(string.find(bob_first_joined, "棉花糖（捣蛋猫）［Bob］｜伤害 400｜100.0%", 1, true) ~= nil)
 assert(#delivered_by_uid[test_guid_key(uid_spectator)] == 0, "spectator received a battle message")
 
 -- Duplicate deaths must be idempotent.
@@ -390,6 +399,50 @@ death(progress_boss)
 run_game_tasks()
 run_delayed_tasks()
 
+-- Mounted Pal skills can report the player as Attacker. DamageCauser ownership
+-- must recover the concrete Pal, while a player-owned weapon stays direct.
+local mounted_boss = boss_actor("BP_RaidBoss_Mounted_C_18")
+local pal_skill_projectile = actor("BP_PalSkillProjectile_C_19", { Owner = player_two_pal })
+local player_weapon = actor("BP_PlayerWeapon_C_20", { Owner = player_two })
+local mounted_before = #bob_inbox
+damage(player_two, mounted_boss, 500, { DamageCauser = pal_skill_projectile })
+damage(player_two, mounted_boss, 200, { DamageCauser = player_weapon })
+death(mounted_boss)
+run_game_tasks()
+run_delayed_tasks()
+local mounted_messages = {}
+for index = mounted_before + 1, #bob_inbox do
+    mounted_messages[#mounted_messages + 1] = bob_inbox[index]
+end
+local mounted_joined = table.concat(mounted_messages, "\n")
+assert(string.find(mounted_joined, "最高伤害帕鲁：棉花糖（捣蛋猫）｜训练家 Bob｜伤害 500", 1, true) ~= nil, "mounted Pal skill was attributed to player")
+assert(string.find(mounted_joined, "最高伤害玩家角色：Bob｜伤害 200", 1, true) ~= nil, "mounted player weapon was attributed to Pal")
+assert(string.find(mounted_joined, "棉花糖（捣蛋猫）［Bob］｜伤害 500｜71.4%", 1, true) ~= nil)
+assert(string.find(mounted_joined, "Bob（玩家角色）｜伤害 200｜28.6%", 1, true) ~= nil)
+assert(string.find(mounted_joined, "最高伤害队伍", 1, true) == nil, "single-team fight printed a redundant team winner")
+
+-- A high-output 10-second window gets an optional triggered comment.
+local comment_boss = boss_actor("BP_RaidBoss_Comment_C_21")
+local comment_before = #delivered
+damage(player_one, comment_boss, 1200000)
+run_game_tasks()
+run_delayed_tasks()
+fake_time = fake_time + 10
+phase = "game"
+BossDPSBroadcastTestApi.publish_progress()
+phase = "idle"
+run_delayed_tasks()
+local comment_messages = {}
+for index = comment_before + 1, #delivered do
+    comment_messages[#comment_messages + 1] = delivered[index]
+end
+local comment_joined = table.concat(comment_messages, "\n")
+assert(string.find(comment_joined, "实时战况", 1, true) ~= nil)
+assert(string.find(comment_joined, "战况点评：", 1, true) ~= nil, "triggered progress comment missing")
+death(comment_boss)
+run_game_tasks()
+run_delayed_tasks()
+
 -- UObject can disappear between hook capture and the next game-thread drain.
 local stale_boss = boss_actor("BP_RaidBoss_Stale_C_16")
 local invalid_before = BossDPSBroadcastTestApi.metrics.invalid
@@ -410,8 +463,9 @@ BossDPSBroadcastTestApi.cleanup_sessions()
 phase = "idle"
 run_delayed_tasks()
 joined = table.concat(delivered, "\n")
-assert(string.find(joined, "统计结束（长时间无伤害）", 1, true) ~= nil, "timeout result missing")
+assert(string.find(joined, "挑战中断（长时间无伤害）", 1, true) ~= nil, "timeout result missing")
 assert(string.find(joined, "团队伤害 250", 1, true) ~= nil, "timeout damage missing")
+assert(string.find(joined, "战斗点评：", 1, true) ~= nil, "failure comment missing")
 
 -- Simultaneous bosses must keep independent totals and rankings.
 local multi_a = boss_actor("BP_RaidBoss_MultiA_C_12")

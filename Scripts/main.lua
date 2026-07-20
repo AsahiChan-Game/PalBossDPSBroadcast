@@ -1,6 +1,7 @@
 ---@diagnostic disable: undefined-global
 
 local config = require("./config")
+local battle_commentary = require("./commentary")
 
 local MOD = "[BossDPSBroadcast]"
 local unpack_args = table.unpack or unpack
@@ -279,24 +280,92 @@ local function resolve_player_state(attacker, utility)
     return nil
 end
 
-local function resolve_damage_owner(attacker, utility)
-    local trainer_ok, trainer = safe_call(utility, "GetTrainerPlayer", attacker)
-    if trainer_ok and is_valid(trainer) then
-        local state = state_from_actor_property(trainer)
-        if state == nil then
-            local state_ok, utility_state = safe_call(utility, "GetPlayerState", trainer)
-            state = state_ok and player_uid(utility_state) ~= nil and utility_state or nil
-        end
+local function state_from_player_actor(actor, utility)
+    local state = state_from_actor_property(actor)
+    if state ~= nil then
+        return state
+    end
+    local state_ok, utility_state = safe_call(utility, "GetPlayerState", actor)
+    return state_ok and player_uid(utility_state) ~= nil and utility_state or nil
+end
+
+local function trainer_state(actor, utility)
+    local trainer_ok, trainer = safe_call(utility, "GetTrainerPlayer", actor)
+    if not trainer_ok or not is_valid(trainer) then
+        return nil
+    end
+    return state_from_player_actor(trainer, utility)
+end
+
+local function resolve_source_actor(candidate, utility, depth, seen)
+    if depth > 3 or not is_valid(candidate) then
+        return nil, nil, nil
+    end
+    local identity = actor_address(candidate) or actor_full_name(candidate)
+    if identity ~= "" and seen[identity] then
+        return nil, nil, nil
+    end
+    if identity ~= "" then
+        seen[identity] = true
+    end
+
+    -- A real Pal character exposes CharacterParameterComponent. Checking this
+    -- before generic player lookup prevents a mounted Pal from becoming a
+    -- player row when a helper API resolves its trainer.
+    local component_ok, component = safe_property(candidate, "CharacterParameterComponent")
+    if component_ok and is_valid(component) then
+        local state = trainer_state(candidate, utility)
         if state ~= nil then
-            return state, "pal"
+            return state, "pal", candidate
         end
     end
 
-    local state = resolve_player_state(attacker, utility)
+    local state = state_from_player_actor(candidate, utility)
     if state ~= nil then
-        return state, "player"
+        return state, "player", candidate
     end
-    return nil, nil
+
+    -- Skill projectiles and unique ride weapons commonly keep the true source
+    -- in one of these ownership fields. Follow a small bounded chain only.
+    for _, property_name in ipairs({ "Owner", "Instigator", "InstigatorController", "OverrideNetworkOwner" }) do
+        local nested_ok, nested = safe_property(candidate, property_name)
+        if nested_ok and is_valid(nested) then
+            local nested_state, nested_kind, nested_source =
+                resolve_source_actor(nested, utility, depth + 1, seen)
+            if nested_state ~= nil then
+                return nested_state, nested_kind, nested_source
+            end
+        end
+    end
+
+    local fallback_state = trainer_state(candidate, utility)
+    if fallback_state ~= nil then
+        return fallback_state, "pal", candidate
+    end
+    return nil, nil, nil
+end
+
+local function resolve_damage_owner(event, utility)
+    local candidates = {}
+    for _, field_name in ipairs({
+        "damage_causer", "override_network_owner", "info_attacker", "attacker",
+    }) do
+        local candidate = event[field_name]
+        if candidate ~= nil then
+            candidates[#candidates + 1] = candidate
+        end
+    end
+    local seen = {}
+    for _, candidate in ipairs(candidates) do
+        if candidate ~= nil then
+            local state, source_kind, source_actor =
+                resolve_source_actor(candidate, utility, 0, seen)
+            if state ~= nil then
+                return state, source_kind, source_actor
+            end
+        end
+    end
+    return nil, nil, nil
 end
 
 local function actor_name_matches_boss_pattern(actor)
@@ -643,6 +712,71 @@ local function queue_messages(messages, recipients)
     end
 end
 
+local function team_recipients(session, team_key)
+    local recipients = {}
+    for _, entry in pairs(session.contributors) do
+        if entry.team_key == team_key then
+            local uid = copy_guid(entry.uid)
+            if uid ~= nil then
+                recipients[#recipients + 1] = uid
+            end
+        end
+    end
+    return recipients
+end
+
+local function queue_team_details(session, duration)
+    local max_rows = math.max(1, math.floor(to_number(config.TeamDetailMaxRows)))
+    for team_key, team in pairs(session.teams) do
+        local sources = {}
+        for _, entry in pairs(session.contributors) do
+            if entry.team_key == team_key and entry.direct_damage > 0 then
+                sources[#sources + 1] = {
+                    name = entry.name .. "（玩家角色）",
+                    damage = entry.direct_damage,
+                    hits = entry.direct_hits,
+                }
+            end
+        end
+        for _, pal in pairs(session.pal_sources) do
+            if pal.team_key == team_key and pal.damage > 0 then
+                sources[#sources + 1] = {
+                    name = pal.name .. "［" .. pal.owner_name .. "］",
+                    damage = pal.damage,
+                    hits = pal.hits,
+                }
+            end
+        end
+        sources = ranked_damage_entries(sources)
+
+        local messages = {
+            string.format(
+                "队内私报：%s｜伤害 %s｜DPS %s｜来源 %d个",
+                team.name,
+                format_integer(team.damage),
+                format_integer(team.damage / duration),
+                #sources
+            ),
+        }
+        for index = 1, math.min(max_rows, #sources) do
+            local source = sources[index]
+            local percent = team.damage > 0 and source.damage * 100 / team.damage or 0
+            messages[#messages + 1] = string.format(
+                "队内 #%d %s｜伤害 %s｜%.1f%%｜DPS %s",
+                index,
+                source.name,
+                format_integer(source.damage),
+                percent,
+                format_integer(source.damage / duration)
+            )
+        end
+        if #sources > max_rows then
+            messages[#messages + 1] = string.format("其余 %d 个伤害来源未展开", #sources - max_rows)
+        end
+        queue_messages(messages, team_recipients(session, team_key))
+    end
+end
+
 local function finish_session(session, reason)
     if session == nil or session.finished == true then
         return
@@ -665,10 +799,12 @@ local function finish_session(session, reason)
     elseif reason == "captured" then
         reason_text = "已捕捉"
     else
-        reason_text = "统计结束（长时间无伤害）"
+        reason_text = "挑战中断（长时间无伤害）"
     end
+    local team_prefix = #teams == 1 and (teams[1].name .. "｜") or ""
     messages[#messages + 1] = string.format(
-        "%s %s！团队伤害 %s｜团队DPS %s｜用时 %d秒｜%d人",
+        "%s%s %s！团队伤害 %s｜团队DPS %s｜用时 %d秒｜%d人",
+        team_prefix,
         session.name,
         reason_text,
         format_integer(session.total_damage),
@@ -677,7 +813,22 @@ local function finish_session(session, reason)
         #rows
     )
 
-    if #teams > 0 then
+    if config.EnableFunComments ~= false then
+        local top_share = #rows > 0 and rows[1].damage * 100 / session.total_damage or 0
+        local second_share = #rows > 1 and rows[2].damage * 100 / session.total_damage or 0
+        local comment = battle_commentary.final({
+            key = session.key,
+            reason = reason,
+            total = session.total_damage,
+            duration = duration,
+            team_dps = session.total_damage / duration,
+            top_share = top_share,
+            second_share = second_share,
+        })
+        messages[#messages + 1] = "战斗点评：" .. tostring(comment)
+    end
+
+    if #teams > 1 then
         local team = teams[1]
         local team_percent = session.total_damage > 0 and team.damage * 100 / session.total_damage or 0
         messages[#messages + 1] = string.format(
@@ -744,6 +895,7 @@ local function finish_session(session, reason)
         tostring(reason), session.name, format_integer(session.total_damage), duration, #rows
     ))
     queue_messages(messages, recipients)
+    queue_team_details(session, duration)
 end
 
 local function start_session(boss_info)
@@ -757,6 +909,8 @@ local function start_session(boss_info)
         last_progress_at = now,
         total_damage = 0,
         progress_damage = 0,
+        previous_progress_dps = 0,
+        progress_index = 0,
         contributors = {},
         teams = {},
         pal_sources = {},
@@ -818,6 +972,7 @@ local function record_damage(session, player_state, damage, source_kind, source_
                 name = display_name,
                 owner_name = entry.name,
                 owner_uid_key = key,
+                team_key = entry.team_key,
                 damage = 0,
                 hits = 0,
             }
@@ -825,6 +980,7 @@ local function record_damage(session, player_state, damage, source_kind, source_
         end
         pal.name = display_name
         pal.owner_name = entry.name
+        pal.team_key = entry.team_key
         pal.damage = pal.damage + damage
         pal.hits = pal.hits + 1
     else
@@ -863,13 +1019,17 @@ local function publish_progress()
             and now - session.last_progress_at >= interval_setting then
             local window = math.max(1, now - session.last_progress_at)
             local rows = ranked_contributors(session)
+            local teams = ranked_damage_entries(session.teams)
             local recipients = session_recipients(session)
+            local current_dps = session.progress_damage / window
+            local team_prefix = #teams == 1 and (teams[1].name .. "｜") or ""
             local messages = {
                 string.format(
-                    "实时战况：%s｜总伤害 %s｜当前DPS %s",
+                    "%s实时战况：%s｜总伤害 %s｜当前DPS %s",
+                    team_prefix,
                     session.name,
                     format_integer(session.total_damage),
-                    format_integer(session.progress_damage / window)
+                    format_integer(current_dps)
                 ),
             }
 
@@ -894,9 +1054,28 @@ local function publish_progress()
                 messages[#messages + 1] = "输出：" .. table.concat(compact, "｜")
             end
 
+            session.progress_index = session.progress_index + 1
+            if config.EnableFunComments ~= false and session.progress_damage > 0 then
+                local top_share = #rows > 0 and rows[1].damage * 100 / session.total_damage or 0
+                local comment = battle_commentary.progress({
+                    key = session.key,
+                    total = session.total_damage,
+                    previous_total = session.total_damage - session.progress_damage,
+                    window_damage = session.progress_damage,
+                    current_dps = current_dps,
+                    previous_dps = session.previous_progress_dps,
+                    top_share = top_share,
+                    window_index = session.progress_index,
+                })
+                if comment ~= nil then
+                    messages[#messages + 1] = "战况点评：" .. tostring(comment)
+                end
+            end
+
             if session.progress_damage > 0 then
                 queue_messages(messages, recipients)
             end
+            session.previous_progress_dps = current_dps
             session.last_progress_at = now
             session.progress_damage = 0
             for _, row in ipairs(rows) do
@@ -917,7 +1096,7 @@ local function process_damage_event(event)
         metrics.invalid = metrics.invalid + 1
         return
     end
-    local state, source_kind = resolve_damage_owner(event.attacker, utility)
+    local state, source_kind, source_actor = resolve_damage_owner(event, utility)
     if state == nil then
         return
     end
@@ -936,7 +1115,7 @@ local function process_damage_event(event)
         end
         session = start_session(boss_info)
     end
-    record_damage(session, state, event.damage, source_kind, event.attacker, utility)
+    record_damage(session, state, event.damage, source_kind, source_actor or event.attacker, utility)
 end
 
 local function process_finish_event(event)
@@ -1044,7 +1223,35 @@ local function capture_damage(damage_param)
     if not ok or attacker == nil or defender == nil or damage == nil then
         return
     end
-    enqueue_event({ kind = "damage", attacker = attacker, defender = defender, damage = damage })
+    local function copied_field(container, field_name)
+        if container == nil then
+            return nil
+        end
+        local field_ok, value = pcall(function()
+            return container[field_name]
+        end)
+        return field_ok and value or nil
+    end
+
+    local damage_info = copied_field(result, "DamageInfo")
+        or copied_field(result, "CharacterDamageInfo")
+        or copied_field(result, "damageInfo")
+    local damage_causer = copied_field(result, "DamageCauser")
+        or copied_field(result, "damageCauser")
+        or copied_field(damage_info, "DamageCauser")
+    local override_network_owner = copied_field(result, "OverrideNetworkOwner")
+        or copied_field(damage_info, "OverrideNetworkOwner")
+    local info_attacker = copied_field(damage_info, "Attacker")
+
+    enqueue_event({
+        kind = "damage",
+        attacker = attacker,
+        defender = defender,
+        damage = damage,
+        damage_causer = damage_causer,
+        override_network_owner = override_network_owner,
+        info_attacker = info_attacker,
+    })
 end
 
 local function capture_death(dead_param)
@@ -1178,7 +1385,7 @@ local function register_hooks()
 
     if hooks.damage and hooks.death then
         log(string.format(
-            "loaded v2.1; hooks capture only, UObject work deferred to game thread; captured_hook=%s",
+            "loaded v2.2; hooks capture only, UObject work deferred to game thread; captured_hook=%s",
             tostring(hooks.captured)
         ))
     else

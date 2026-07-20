@@ -15,6 +15,13 @@ config.MaxResultRows = 20
 config.ProgressIntervalSeconds = 10
 config.ProgressMaxRows = 4
 
+-- Maximum player-character/Pal source rows in each team-only final detail.
+config.TeamDetailMaxRows = 12
+
+-- Fun battle comments: progress comments only appear when a threshold is met;
+-- every final result always receives one comment.
+config.EnableFunComments = true
+
 -- Delay between result lines to avoid flooding the chat feed.
 config.MessageIntervalMilliseconds = 1000
 
