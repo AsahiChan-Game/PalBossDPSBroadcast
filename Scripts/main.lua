@@ -659,18 +659,24 @@ local function send_participant_message(message, recipients)
     end
 
     local chat_text = sanitize_utf8(message)
-    local sent = 0
-    for _, receiver_uid in ipairs(recipients or {}) do
-        local ok, result = safe_call(
-            utility, "SendSystemToPlayerChat", world, chat_text, receiver_uid
-        )
-        if ok then
-            sent = sent + 1
-        else
-            log("participant message failed: " .. tostring(result))
-        end
+    local receiver_uids = recipients or {}
+    if #receiver_uids == 0 then
+        return false
     end
-    return sent > 0
+
+    -- Palworld 1.0 expects TArray<FGuid>, not one FGuid per call. Passing a
+    -- single GUID is converted as an empty array, which makes the game treat
+    -- the message as global system chat. Repeating that call for N players
+    -- therefore broadcasts the same line N times. A Lua array of GUID structs
+    -- is converted by UE4SS to the required TArray in one UFunction call.
+    local ok, result = safe_call(
+        utility, "SendSystemToPlayerChat", world, chat_text, receiver_uids
+    )
+    if not ok then
+        log("participant message failed: " .. tostring(result))
+        return false
+    end
+    return true
 end
 
 local function announce(message, recipients)
@@ -1527,7 +1533,7 @@ local function register_hooks()
 
     if hooks.damage and hooks.death then
         log(string.format(
-            "loaded v2.7; central capture hook plus fallbacks; UObject work deferred to game thread; captured_hooks=%d",
+            "loaded v2.8; batched private recipient arrays; central capture plus fallbacks; captured_hooks=%d",
             hooks.captured_count
         ))
     else

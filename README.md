@@ -1,4 +1,4 @@
-# BossDPSBroadcast v2.7
+# BossDPSBroadcast v2.8
 
 Palworld 1.0 专用服务器 UE4SS Lua Boss 团队伤害统计插件。
 
@@ -18,6 +18,7 @@ Palworld 1.0 专用服务器 UE4SS Lua Boss 团队伤害统计插件。
 - 玩家、公会、Boss 和帕鲁名称统一进行严格 UTF-8 清理，并按完整 Unicode 字符截断，长中文昵称不会再因截断半个字符导致整条消息发送失败。
 - Boss 名优先使用游戏本地化数据库和中文覆盖表，绝不显示完整 `/Game/...` UObject 路径。
 - 所有游戏内消息只发给本场造成过有效伤害的玩家；旁观者和其他在线玩家不会收到。
+- 收件人按一次调用中的 `TArray<FGuid>` 批量传入；参与人数不会再导致同一行重复广播，也不会因空数组而误发到公屏。
 
 ## 统计口径
 
@@ -35,7 +36,7 @@ Palworld 1.0 专用服务器 UE4SS Lua Boss 团队伤害统计插件。
 
 当前版本按 Boss 实例分别统计和结算。1.0 服务端二进制存在 `RaidBossAreaInstanceId`、`DungeonInstanceId`、`OnRaidBossBattleStart`、`OnRaidBossBattleFinish` 等可用于遭遇战分组的反射名称，但尚未确认完整类路径和运行时参数，因此没有用时间窗口强行合并，避免把地图上另一队的战斗混入。
 
-`!DPS` 手动开关可通过当前服务器已确认加载的 `/Script/Pal.PalPlayerController:EnterChat_Receive` 读取 `FPalChatMessage` 实现，而且 Controller 可直接确定发起玩家。推荐后续语义：发起者第一次输入建立房间会话；其首个 Boss 命中作为种子；攻击该 Boss 的玩家加入会话；已加入玩家攻击的新 Boss 并入同一会话；只有发起者再次输入可结束。该功能尚未进入 v2.7。服务器现有 `AdminCommands` 同样占用 `!` 前缀，因此实现前还需处理命令注册冲突。
+`!DPS` 手动开关可通过当前服务器已确认加载的 `/Script/Pal.PalPlayerController:EnterChat_Receive` 读取 `FPalChatMessage` 实现，而且 Controller 可直接确定发起玩家。推荐后续语义：发起者第一次输入建立房间会话；其首个 Boss 命中作为种子；攻击该 Boss 的玩家加入会话；已加入玩家攻击的新 Boss 并入同一会话；只有发起者再次输入可结束。该功能尚未进入 v2.8。服务器现有 `AdminCommands` 同样占用 `!` 前缀，因此实现前还需处理命令注册冲突。
 
 ## 安全结构
 
