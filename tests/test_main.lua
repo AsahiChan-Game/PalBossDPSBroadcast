@@ -282,6 +282,56 @@ end
 _G.__BOSS_DPS_TEST = true
 dofile("../Scripts/main.lua")
 
+local commentary = require("commentary")
+local commentary_base = {
+    key = "template-test",
+    guild = "测试公会",
+    player = "测试玩家",
+    runnerup = "追榜玩家",
+    pal = "测试帕鲁",
+    boss = "测试Boss",
+    total = 50000,
+    previous_total = 40000,
+    window_damage = 10000,
+    current_dps = 1000,
+    previous_dps = 1000,
+    top_share = 50,
+    second_share = 40,
+    team_dps = 1000,
+    duration = 10,
+    window_index = 1,
+    reason = "defeated",
+}
+local function commentary_case(overrides, final)
+    local stats = {}
+    for key, value in pairs(commentary_base) do
+        stats[key] = value
+    end
+    for key, value in pairs(overrides) do
+        stats[key] = value
+    end
+    local result = final and commentary.final(stats) or commentary.progress(stats)
+    assert(result ~= nil, "commentary branch did not produce text")
+    assert(string.find(result, "{", 1, true) == nil, "unrendered commentary placeholder")
+    assert(string.find(result, "测试公会", 1, true) ~= nil
+        or string.find(result, "测试玩家", 1, true) ~= nil,
+        "commentary did not use live guild/player data")
+end
+
+commentary_case({ current_dps = 1000000 }, false)
+commentary_case({ total = 1000000, previous_total = 900000 }, false)
+commentary_case({ current_dps = 100000 }, false)
+commentary_case({ current_dps = 20000, previous_dps = 5000 }, false)
+commentary_case({ total = 20000, top_share = 90 }, false)
+commentary_case({ reason = "timeout" }, true)
+commentary_case({ reason = "captured" }, true)
+commentary_case({ duration = 2 }, true)
+commentary_case({ total = 1000000 }, true)
+commentary_case({ team_dps = 100000 }, true)
+commentary_case({ top_share = 51, second_share = 49 }, true)
+commentary_case({ total = 20000, top_share = 90, second_share = 0 }, true)
+commentary_case({}, true)
+
 local damage_hook = callbacks["/Script/Pal.PalEventNotify_Character:OnCharacterDamaged_ServerInternal"]
 local death_hook = callbacks["/Script/Pal.PalEventNotify_Character:OnCharacterDead_ServerInternal"]
 local captured_hook = callbacks["/Script/Pal.PalCaptureJudgeObject:OnCaptureSuccess"]
@@ -474,6 +524,8 @@ end
 local comment_joined = table.concat(comment_messages, "\n")
 assert(string.find(comment_joined, "实时战况", 1, true) ~= nil)
 assert(string.find(comment_joined, "战况点评：", 1, true) ~= nil, "triggered progress comment missing")
+assert(string.find(comment_joined, "红队", 1, true) ~= nil or string.find(comment_joined, "Alice", 1, true) ~= nil, "progress comment did not render live names")
+assert(string.find(comment_joined, "{guild}", 1, true) == nil, "comment template was not rendered")
 death(comment_boss)
 run_game_tasks()
 run_delayed_tasks()

@@ -13,6 +13,9 @@ if ($LASTEXITCODE -ne 0) { throw "main.lua parse failed" }
 if ($LASTEXITCODE -ne 0) { throw "config.lua parse failed" }
 & npx --yes --package=luaparse luaparse --quiet --file $commentaryScript
 if ($LASTEXITCODE -ne 0) { throw "commentary.lua parse failed" }
+if (Select-String -Path $commentaryScript -Pattern "糖罐" -SimpleMatch -Quiet) {
+    throw "commentary.lua contains a hard-coded guild name"
+}
 
 Write-Host "[2/4] Auditing forbidden crash-path APIs"
 $forbidden = "ExecuteWithDelay|SendSystemAnnounce|GetIndividualCharacterParameterByActor|IsBossPal_Database\(|IsTowerBossPal\(|FindAllOf"

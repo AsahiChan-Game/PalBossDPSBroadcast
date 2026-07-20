@@ -1,4 +1,4 @@
-# BossDPSBroadcast v2.3
+# BossDPSBroadcast v2.4
 
 Palworld 1.0 专用服务器 UE4SS Lua Boss 团队伤害统计插件。
 
@@ -9,6 +9,7 @@ Palworld 1.0 专用服务器 UE4SS Lua Boss 团队伤害统计插件。
 - 每个 Boss 实例独立统计；同一房间的多个 Boss 不会串伤害。
 - 击杀、捕捉和 300 秒无伤害均可结束会话；1.0 捕捉使用 `PalCaptureJudgeObject:OnCaptureSuccess`。
 - 每 10 秒发送实时战况：累计伤害、最近窗口当前 DPS、个人累计占比和个人当前 DPS；达到爆发、百万伤害、输出翻倍或高占比等条件时额外穿插趣味点评，普通窗口不刷点评。
+- 趣味点评使用实时模板数据，可动态带入公会名、玩家名、帕鲁昵称和 Boss 名；点评脚本不再硬编码服务器公会名。
 - 结算包含团队伤害/团队 DPS、最高伤害玩家角色、最高伤害帕鲁和玩家综合排名，并且一定附带一条按秒杀、百万伤害、捕捉、失败等结果生成的趣味点评。
 - 击杀结算首行使用聊天窗口醒目播报：最后一击玩家（或“训练家 的 帕鲁昵称”）、Boss 名、用时、团队 DPS 和团队伤害；仍只发送给本场贡献者。
 - 多队参与时显示最高伤害队伍；只有一个队伍时直接以队伍名作为结算标题，不重复播报“最高伤害队伍”。
@@ -34,7 +35,7 @@ Palworld 1.0 专用服务器 UE4SS Lua Boss 团队伤害统计插件。
 
 当前版本按 Boss 实例分别统计和结算。1.0 服务端二进制存在 `RaidBossAreaInstanceId`、`DungeonInstanceId`、`OnRaidBossBattleStart`、`OnRaidBossBattleFinish` 等可用于遭遇战分组的反射名称，但尚未确认完整类路径和运行时参数，因此没有用时间窗口强行合并，避免把地图上另一队的战斗混入。
 
-`!DPS` 手动开关可通过当前服务器已确认加载的 `/Script/Pal.PalPlayerController:EnterChat_Receive` 读取 `FPalChatMessage` 实现，而且 Controller 可直接确定发起玩家。推荐后续语义：发起者第一次输入建立房间会话；其首个 Boss 命中作为种子；攻击该 Boss 的玩家加入会话；已加入玩家攻击的新 Boss 并入同一会话；只有发起者再次输入可结束。该功能尚未进入 v2.3。服务器现有 `AdminCommands` 同样占用 `!` 前缀，因此实现前还需处理命令注册冲突。
+`!DPS` 手动开关可通过当前服务器已确认加载的 `/Script/Pal.PalPlayerController:EnterChat_Receive` 读取 `FPalChatMessage` 实现，而且 Controller 可直接确定发起玩家。推荐后续语义：发起者第一次输入建立房间会话；其首个 Boss 命中作为种子；攻击该 Boss 的玩家加入会话；已加入玩家攻击的新 Boss 并入同一会话；只有发起者再次输入可结束。该功能尚未进入 v2.4。服务器现有 `AdminCommands` 同样占用 `!` 前缀，因此实现前还需处理命令注册冲突。
 
 ## 安全结构
 

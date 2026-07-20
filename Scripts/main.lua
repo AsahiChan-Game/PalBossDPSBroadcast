@@ -914,6 +914,11 @@ local function finish_session(session, reason)
             team_dps = session.total_damage / duration,
             top_share = top_share,
             second_share = second_share,
+            guild = #teams > 0 and teams[1].name or "全队",
+            player = #rows > 0 and rows[1].name or "本场选手",
+            runnerup = #rows > 1 and rows[2].name or "另一位高手",
+            pal = #pals > 0 and pals[1].name or "帕鲁伙伴",
+            boss = session.name,
         })
         messages[#messages + 1] = "战斗点评：" .. tostring(comment)
     end
@@ -1112,6 +1117,7 @@ local function publish_progress()
             local window = math.max(1, now - session.last_progress_at)
             local rows = ranked_contributors(session)
             local teams = ranked_damage_entries(session.teams)
+            local pals = ranked_damage_entries(session.pal_sources)
             local recipients = session_recipients(session)
             local current_dps = session.progress_damage / window
             local team_prefix = #teams == 1 and (teams[1].name .. "｜") or ""
@@ -1158,6 +1164,11 @@ local function publish_progress()
                     previous_dps = session.previous_progress_dps,
                     top_share = top_share,
                     window_index = session.progress_index,
+                    guild = #teams > 0 and teams[1].name or "全队",
+                    player = #rows > 0 and rows[1].name or "本场选手",
+                    runnerup = #rows > 1 and rows[2].name or "另一位高手",
+                    pal = #pals > 0 and pals[1].name or "帕鲁伙伴",
+                    boss = session.name,
                 })
                 if comment ~= nil then
                     messages[#messages + 1] = "战况点评：" .. tostring(comment)
@@ -1477,7 +1488,7 @@ local function register_hooks()
 
     if hooks.damage and hooks.death then
         log(string.format(
-            "loaded v2.3; hooks capture only, UObject work deferred to game thread; captured_hook=%s",
+            "loaded v2.4; hooks capture only, UObject work deferred to game thread; captured_hook=%s",
             tostring(hooks.captured)
         ))
     else
