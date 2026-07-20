@@ -162,6 +162,7 @@ local utility = object({}, {
     end,
     SendSystemToPlayerChat = function(_, context, message, receiver_uid)
         assert(context == world, "unexpected world context")
+        assert(utf8.len(message) ~= nil, "invalid UTF-8 reached SendSystemToPlayerChat")
         local inbox = delivered_by_uid[test_guid_key(receiver_uid)]
         assert(inbox ~= nil, "message sent to unknown receiver")
         inbox[#inbox + 1] = message
@@ -420,6 +421,40 @@ assert(string.find(mounted_joined, "最高伤害玩家角色：Bob｜伤害 200"
 assert(string.find(mounted_joined, "棉花糖（捣蛋猫）［Bob］｜伤害 500｜71.4%", 1, true) ~= nil)
 assert(string.find(mounted_joined, "Bob（玩家角色）｜伤害 200｜28.6%", 1, true) ~= nil)
 assert(string.find(mounted_joined, "最高伤害队伍", 1, true) == nil, "single-team fight printed a redundant team winner")
+assert(string.find(mounted_joined, "击杀播报：Bob 击败了 RaidBoss_Mounted", 1, true) ~= nil, "player final blow announcement missing")
+
+-- Regression for the real 1.0 failure: byte-based truncation could split a
+-- Chinese Pal nickname and make SendSystemToPlayerChat raise "bad conversion".
+local long_pal_parameter = object({}, {
+    GetAddress = function()
+        return 9103
+    end,
+    GetCharacterID = function()
+        return "PinkCat"
+    end,
+    GetNickname = function(_, out_name)
+        out_name.outName = "思冬拳思如泉涌!念冬剑念念不忘!浩冬掌生生世世!"
+    end,
+})
+local long_pal = actor("BP_PinkCat_C_22", {
+    CharacterParameterComponent = object({ IndividualParameter = long_pal_parameter }),
+})
+trainer_by_actor[long_pal] = player_two
+local encoding_boss = boss_actor("BP_RaidBoss_Encoding_C_23")
+local encoding_before = #bob_inbox
+damage(long_pal, encoding_boss, 2865)
+death(encoding_boss)
+run_game_tasks()
+run_delayed_tasks()
+local encoding_messages = {}
+for index = encoding_before + 1, #bob_inbox do
+    encoding_messages[#encoding_messages + 1] = bob_inbox[index]
+    assert(utf8.len(bob_inbox[index]) ~= nil, "delivered message contains invalid UTF-8")
+end
+local encoding_joined = table.concat(encoding_messages, "\n")
+assert(string.find(encoding_joined, "最高伤害帕鲁：思冬拳思如泉涌!念冬剑念念不忘!浩冬掌生生世世!（捣蛋猫）", 1, true) ~= nil, "long Pal name swallowed MVP row")
+assert(string.find(encoding_joined, "队内 #1 思冬拳思如泉涌!念冬剑念念不忘!浩冬掌生生世世!（捣蛋猫）", 1, true) ~= nil, "long Pal name swallowed private row")
+assert(string.find(encoding_joined, "击杀播报：Bob 的 思冬拳思如泉涌!念冬剑念念不忘!浩冬掌生生世世!（捣蛋猫） 击败了 RaidBoss_Encoding", 1, true) ~= nil, "Pal final blow announcement missing")
 
 -- A high-output 10-second window gets an optional triggered comment.
 local comment_boss = boss_actor("BP_RaidBoss_Comment_C_21")
@@ -483,8 +518,8 @@ for index = delivered_before_multi + 1, #delivered do
     multi_messages[#multi_messages + 1] = delivered[index]
 end
 local multi_joined = table.concat(multi_messages, "\n")
-assert(string.find(multi_joined, "RaidBoss_MultiA 已击败！团队伤害 100", 1, true) ~= nil, "boss A total mixed")
-assert(string.find(multi_joined, "RaidBoss_MultiB 已击败！团队伤害 350", 1, true) ~= nil, "boss B total mixed")
+assert(string.find(multi_joined, "击败了 RaidBoss_MultiA｜用时 1秒｜团队DPS 100｜团队伤害 100", 1, true) ~= nil, "boss A total mixed")
+assert(string.find(multi_joined, "击败了 RaidBoss_MultiB｜用时 1秒｜团队DPS 350｜团队伤害 350", 1, true) ~= nil, "boss B total mixed")
 
 -- A captured/owned boss variant must not start a PvE boss session.
 local owned_boss = boss_actor("BP_RaidBoss_Owned_C_14")
@@ -517,7 +552,7 @@ assert(drain_count == 33, "8192 damage events plus death should drain in 33 batc
 assert(BossDPSBroadcastTestApi.queue_size() == 0, "stress queue did not fully drain")
 run_delayed_tasks()
 joined = table.concat(delivered, "\n")
-assert(string.find(joined, "RaidBoss_Stress 已击败！团队伤害 1", 1, true) ~= nil, "death was lost behind burst traffic")
+assert(string.find(joined, "击败了 RaidBoss_Stress｜用时 1秒｜团队DPS 1｜团队伤害 1", 1, true) ~= nil, "death was lost behind burst traffic")
 assert(BossDPSBroadcastTestApi.metrics.errors == 0, "unexpected processing errors")
 assert(#delivered_by_uid[test_guid_key(uid_spectator)] == 0, "spectator received any participant-only report")
 

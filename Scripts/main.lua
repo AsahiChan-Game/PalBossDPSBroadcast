@@ -139,6 +139,104 @@ local function text_value(value)
     return string.gsub(text, "^[%w_]+:%s*", "")
 end
 
+-- UE4SS converts Lua strings to Unreal FString when sending chat. Lua's
+-- string.sub works in bytes, so cutting a Chinese name in the middle of a
+-- multi-byte character produces an invalid UTF-8 string and UE4SS raises
+-- "bad conversion". Keep every label and final message on valid boundaries.
+local function utf8_sequence_length(text, index)
+    local first = string.byte(text, index)
+    if first == nil then
+        return nil
+    end
+    if first <= 0x7F then
+        return 1
+    end
+
+    local second = string.byte(text, index + 1)
+    local third = string.byte(text, index + 2)
+    local fourth = string.byte(text, index + 3)
+    local continuation = function(value)
+        return value ~= nil and value >= 0x80 and value <= 0xBF
+    end
+
+    if first >= 0xC2 and first <= 0xDF and continuation(second) then
+        return 2
+    end
+    if first == 0xE0 and second ~= nil and second >= 0xA0 and second <= 0xBF
+        and continuation(third) then
+        return 3
+    end
+    if ((first >= 0xE1 and first <= 0xEC) or (first >= 0xEE and first <= 0xEF))
+        and continuation(second) and continuation(third) then
+        return 3
+    end
+    if first == 0xED and second ~= nil and second >= 0x80 and second <= 0x9F
+        and continuation(third) then
+        return 3
+    end
+    if first == 0xF0 and second ~= nil and second >= 0x90 and second <= 0xBF
+        and continuation(third) and continuation(fourth) then
+        return 4
+    end
+    if first >= 0xF1 and first <= 0xF3 and continuation(second)
+        and continuation(third) and continuation(fourth) then
+        return 4
+    end
+    if first == 0xF4 and second ~= nil and second >= 0x80 and second <= 0x8F
+        and continuation(third) and continuation(fourth) then
+        return 4
+    end
+    return nil
+end
+
+local function sanitize_utf8(value)
+    local input = tostring(value or "")
+    local output = {}
+    local index = 1
+    while index <= #input do
+        local length = utf8_sequence_length(input, index)
+        if length == nil then
+            output[#output + 1] = "?"
+            index = index + 1
+        else
+            local first = string.byte(input, index)
+            if length == 1 and (first < 0x20 or first == 0x7F) then
+                output[#output + 1] = " "
+            else
+                output[#output + 1] = string.sub(input, index, index + length - 1)
+            end
+            index = index + length
+        end
+    end
+    return table.concat(output)
+end
+
+local function truncate_utf8(value, max_characters)
+    local text = sanitize_utf8(value)
+    local index = 1
+    local count = 0
+    local last_byte = 0
+    while index <= #text and count < max_characters do
+        local length = utf8_sequence_length(text, index) or 1
+        last_byte = index + length - 1
+        index = index + length
+        count = count + 1
+    end
+    if last_byte < #text then
+        return string.sub(text, 1, last_byte) .. "…"
+    end
+    return text
+end
+
+local function clean_label(value, fallback)
+    local label = sanitize_utf8(text_value(value))
+    label = string.gsub(label, "%s+", " ")
+    if label == "" then
+        label = sanitize_utf8(fallback or "")
+    end
+    return truncate_utf8(label, 48)
+end
+
 local function actor_full_name(actor)
     local ok, name = safe_call(actor, "GetFullName")
     if ok and name ~= nil then
@@ -233,11 +331,7 @@ local function player_name(player_state)
         local object_ok, object_name = safe_call(player_state, "GetName")
         name = object_ok and text_value(object_name) or "Unknown Player"
     end
-    name = string.gsub(name, "[\r\n]+", " ")
-    if #name > 40 then
-        name = string.sub(name, 1, 40)
-    end
-    return name
+    return clean_label(name, "Unknown Player")
 end
 
 local function state_from_actor_property(actor)
@@ -479,18 +573,6 @@ local function get_boss_info(actor, utility)
     }
 end
 
-local function clean_label(value, fallback)
-    local label = text_value(value)
-    label = string.gsub(label, "[\r\n]+", " ")
-    if label == "" then
-        label = tostring(fallback or "")
-    end
-    if #label > 48 then
-        label = string.sub(label, 1, 48)
-    end
-    return label
-end
-
 local function localized_character_name(character_id, utility, fallback)
     local normalized = normalized_boss_id(character_id)
     local override = (config.PalNameOverrides or {})[normalized]
@@ -576,10 +658,11 @@ local function send_participant_message(message, recipients)
         return false
     end
 
+    local chat_text = sanitize_utf8(message)
     local sent = 0
     for _, receiver_uid in ipairs(recipients or {}) do
         local ok, result = safe_call(
-            utility, "SendSystemToPlayerChat", world, tostring(message), receiver_uid
+            utility, "SendSystemToPlayerChat", world, chat_text, receiver_uid
         )
         if ok then
             sent = sent + 1
@@ -793,25 +876,32 @@ local function finish_session(session, reason)
     local pals = ranked_damage_entries(session.pal_sources)
     local recipients = session_recipients(session)
     local messages = {}
-    local reason_text
-    if reason == "defeated" then
-        reason_text = "已击败"
-    elseif reason == "captured" then
-        reason_text = "已捕捉"
-    else
-        reason_text = "挑战中断（长时间无伤害）"
-    end
     local team_prefix = #teams == 1 and (teams[1].name .. "｜") or ""
-    messages[#messages + 1] = string.format(
-        "%s%s %s！团队伤害 %s｜团队DPS %s｜用时 %d秒｜%d人",
-        team_prefix,
-        session.name,
-        reason_text,
-        format_integer(session.total_damage),
-        format_integer(session.total_damage / duration),
-        duration,
-        #rows
-    )
+    if reason == "defeated" then
+        messages[#messages + 1] = string.format(
+            "%s击杀播报：%s 击败了 %s｜用时 %d秒｜团队DPS %s｜团队伤害 %s｜%d人",
+            team_prefix,
+            session.last_hitter_label or "团队",
+            session.name,
+            duration,
+            format_integer(session.total_damage / duration),
+            format_integer(session.total_damage),
+            #rows
+        )
+    else
+        local reason_text = reason == "captured" and "已捕捉"
+            or "挑战中断（长时间无伤害）"
+        messages[#messages + 1] = string.format(
+            "%s%s %s！团队伤害 %s｜团队DPS %s｜用时 %d秒｜%d人",
+            team_prefix,
+            session.name,
+            reason_text,
+            format_integer(session.total_damage),
+            format_integer(session.total_damage / duration),
+            duration,
+            #rows
+        )
+    end
 
     if config.EnableFunComments ~= false then
         local top_share = #rows > 0 and rows[1].damage * 100 / session.total_damage or 0
@@ -983,9 +1073,11 @@ local function record_damage(session, player_state, damage, source_kind, source_
         pal.team_key = entry.team_key
         pal.damage = pal.damage + damage
         pal.hits = pal.hits + 1
+        session.last_hitter_label = entry.name .. " 的 " .. display_name
     else
         entry.direct_damage = entry.direct_damage + damage
         entry.direct_hits = entry.direct_hits + 1
+        session.last_hitter_label = entry.name
     end
 
     if session.start_announced ~= true then
@@ -1385,7 +1477,7 @@ local function register_hooks()
 
     if hooks.damage and hooks.death then
         log(string.format(
-            "loaded v2.2; hooks capture only, UObject work deferred to game thread; captured_hook=%s",
+            "loaded v2.3; hooks capture only, UObject work deferred to game thread; captured_hook=%s",
             tostring(hooks.captured)
         ))
     else
