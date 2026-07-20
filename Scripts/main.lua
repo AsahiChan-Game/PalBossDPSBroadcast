@@ -1485,10 +1485,14 @@ local function register_hooks()
     end
 
     local capture_candidates = {
+        -- Central 1.0 capture-success utility. Its two object parameters are
+        -- the attacking player and the captured monster, so it covers normal
+        -- field bosses without relying on an encounter-specific listener.
+        "/Script/Pal.PalUtility:PalCaptureSuccess",
         -- Palworld 1.0 Modding Kit owners and exact signatures. These are
-        -- dynamic-delegate listeners that ProcessEvent actually reaches on a
-        -- dedicated server; OnCaptureSuccess may be called through its native
-        -- _Implementation and can therefore be bypassed by UE4SS hooks.
+        -- encounter-specific follow-up listeners. Some field-boss capture
+        -- flows do not call them, but they remain useful as compatibility
+        -- fallbacks for dungeons, lock gimmicks, raids, and special bosses.
         "/Script/Pal.PalDungeonInstanceModel:OnCapturedBoss_ServerInternal",
         "/Script/Pal.PalDungeonGimmickUnlockableDoor_DefeatCharacterOnSpawner:OnCapturedCharacter_ServerInternal",
         "/Script/Pal.PalAICombatModule_KingWhale_Wild:OnCaptured_ServerInternal",
@@ -1523,7 +1527,7 @@ local function register_hooks()
 
     if hooks.damage and hooks.death then
         log(string.format(
-            "loaded v2.6; hooks capture only, UObject work deferred to game thread; captured_hooks=%d",
+            "loaded v2.7; central capture hook plus fallbacks; UObject work deferred to game thread; captured_hooks=%d",
             hooks.captured_count
         ))
     else
