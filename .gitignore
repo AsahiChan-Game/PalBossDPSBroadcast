@@ -1,0 +1,7 @@
+*.log
+*.dmp
+*.zip
+dist/
+.idea/
+.vscode/
+enabled.txt.disabled*

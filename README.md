@@ -1,4 +1,4 @@
-# PalBossDPSBroadcast v3.0.0
+# PalBossDPSBroadcast v3.1.0
 
 适用于 Palworld 1.0 专用服务器的 UE4SS Lua Boss 伤害统计模组。
 
@@ -6,21 +6,22 @@
 
 ## 默认效果
 
-公开版默认采用低打扰模式。一场三人 Boss 战只发送四行：
+公开版默认采用低打扰模式。一场三人 Boss 战发送一行开始确认和四行最终结算：
 
 ```text
+[BossDPS] 开始统计：Boss名称 已进入战斗
 [BossDPS] 击杀播报：玩家A 的 帕鲁昵称 击败了 Boss名称｜用时 104秒｜团队DPS 8,185｜团队伤害 851,258｜3人
 [BossDPS] MVP #1 玩家A｜伤害 600,904｜70.6%｜DPS 5,778
 [BossDPS] #2 玩家B｜伤害 243,426｜28.6%｜DPS 2,341
 [BossDPS] #3 玩家C｜伤害 6,928｜0.8%｜DPS 67
 ```
 
-默认关闭开始提示、10 秒实时播报、趣味点评、角色/帕鲁奖项和逐只帕鲁明细。这些组件都可以在配置中独立开启。
+默认保留开始提示，方便确认模组已识别当前 Boss；10 秒实时播报、趣味点评、角色/帕鲁奖项和逐只帕鲁明细保持关闭。这些组件都可以在配置中独立开启。
 
 ## 功能
 
 - Boss 首次受到可归属给玩家的有效伤害时自动开始统计。
-- 每个 Boss 实例独立记录，同一房间的多个 Boss 不会串数据。
+- 普通 Boss 实例独立记录；月亮领主的身体、头部和双手合并为一场遭遇，同一时间存在的两个复合 Boss 仍按共同 Owner/父 Actor 隔离。
 - 支持击杀、捕捉和长时间无伤害三种结算路径。
 - 玩家本人和其所有帕鲁伤害合并为玩家综合排名。
 - 内部仍按玩家角色和每只帕鲁分别记录，可选显示详细奖项和队内明细。
@@ -30,6 +31,7 @@
 - 只向本场造成过伤害的玩家发送消息，旁观者和其他在线玩家不会收到。
 - 所有收件人通过一个 `TArray<FGuid>` 批量发送，同一行不会按参与人数重复。
 - 有界事件队列和游戏线程消息泵避免在原生伤害回调中调用 UObject/UFunction。
+- 普通目标负缓存以及攻击来源、玩家和帕鲁元数据缓存减少多段技能产生的游戏线程反射查询。
 
 ## 环境要求
 
@@ -64,7 +66,7 @@ Palworld 或 UE4SS 更新后，反射函数名称可能变化。更新游戏前�
 6. 启动服务器，在 `ue4ss/UE4SS.log` 中搜索：
 
    ```text
-   [BossDPSBroadcast] loaded v3.0.0
+   [BossDPSBroadcast] loaded v3.1.0
    ```
 
 更新旧版本时，先备份自己的 `Scripts/config.lua`，再覆盖模组文件并重新应用配置。
@@ -76,7 +78,7 @@ Palworld 或 UE4SS 更新后，反射函数名称可能变化。更新游戏前�
 | 配置项 | 默认值 | 作用 |
 |---|---:|---|
 | `EnableDPSRecording` | `true` | 总开关；关闭后不记录也不发送任何战报 |
-| `BroadcastStart` | `false` | 首次有效命中时发送开始提示 |
+| `BroadcastStart` | `true` | 首次有效命中时发送一行开始确认 |
 | `EnableProgressReports` | `false` | 发送周期性实时战况 |
 | `ProgressIntervalSeconds` | `10` | 实时战况间隔秒数 |
 | `ProgressMaxRows` | `4` | 实时战况最多显示的玩家数 |
@@ -90,6 +92,8 @@ Palworld 或 UE4SS 更新后，反射函数名称可能变化。更新游戏前�
 | `InactivityTimeoutSeconds` | `60` | 无伤害多久后结束未完成战斗 |
 | `CleanupIntervalSeconds` | `10` | 超时检查间隔 |
 | `MessageIntervalMilliseconds` | `1000` | 消息行之间的发送间隔 |
+| `NonBossCacheSeconds` | `60` | 普通非 Boss 目标的快速判定缓存时间 |
+| `CompositePartJoinWindowSeconds` | `15` | 无共同 Owner 信息时，复合 Boss 部位加入同场遭遇的兜底窗口 |
 
 完整示例和预设见 [配置说明](docs/CONFIGURATION.md)。
 
@@ -100,17 +104,21 @@ Palworld 或 UE4SS 更新后，反射函数名称可能变化。更新游戏前�
 - 当前 DPS：最近一次实时播报窗口的伤害除以实际窗口时长。
 - 最终 DPS：整场累计伤害除以战斗持续时间。
 - 并列时按有效命中次数排序，再按显示名稳定排序。
-- 多 Boss 按实际 Actor 实例分别统计，不以时间窗口强制合并。
+- 普通多 Boss 按实际 Actor 实例分别统计；仅配置中明确列出的复合 Boss 部位会合并。
 
 ## 常见问题
 
 ### 完全没有战报
 
-检查 `enabled.txt` 是否存在、`EnableDPSRecording` 是否为 `true`，并在 `UE4SS.log` 中确认出现 `loaded v3.0.0`。
+检查 `enabled.txt` 是否存在、`EnableDPSRecording` 是否为 `true`，并在 `UE4SS.log` 中确认出现 `loaded v3.1.0`。
 
 ### 别人的 Boss 战也发给我，或三个人重复三遍
 
-这是旧版将单个 `FGuid` 错当成收件人数组导致的问题。v3.0.0 使用一次调用中的完整 `TArray<FGuid>`。确认日志加载的是 v3.0.0，而不是旧版本。
+这是旧版将单个 `FGuid` 错当成收件人数组导致的问题。v3.0.0 及以上版本使用一次调用中的完整 `TArray<FGuid>`。确认日志加载的是 v3.1.0，而不是旧版本。
+
+### 月亮领主出现四次统计或战斗时明显卡顿
+
+v3.1.0 会将身体、头部和左右部件合并成一场遭遇，并缓存重复的攻击来源与帕鲁名称查询。确认日志只出现一次 `session started boss=月亮领主`，其他部位应显示为 `composite part joined`。
 
 ### 捕捉后不立即结算
 

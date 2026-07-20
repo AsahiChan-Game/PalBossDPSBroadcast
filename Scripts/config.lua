@@ -9,7 +9,7 @@ config.MessagePrefix = "[BossDPS]"
 
 -- Optional components. Compact, low-noise output is the public default.
 -- Change a switch, then restart the server once to apply it.
-config.BroadcastStart = false
+config.BroadcastStart = true
 config.EnableProgressReports = false
 config.EnableDetailedAwards = false
 config.EnableTeamDetails = false
@@ -47,6 +47,23 @@ config.ShowDPS = true
 -- each game-thread drain processes at most MaxEventsPerDrain events.
 config.MaxPendingEvents = 8192
 config.MaxEventsPerDrain = 256
+config.MaxSourceOwnerCacheEntries = 2048
+
+-- Cache targets already confirmed to be ordinary non-boss actors. This keeps
+-- global damage events from repeatedly running player/Pal ownership queries.
+config.NonBossCacheSeconds = 60
+
+-- Known multi-actor bosses. All listed parts share one encounter total. A
+-- terminal part ends the whole encounter; non-terminal part deaths do not.
+-- Parts with a common Owner/attach parent are matched first. The short join
+-- window is only a fallback for builds where that relationship is unavailable.
+config.CompositePartJoinWindowSeconds = 15
+config.CompositeBossParts = {
+    YakushimaBoss002_B = { group = "YakushimaBoss002", terminal = true },
+    YakushimaBoss002_Head = { group = "YakushimaBoss002" },
+    YakushimaBoss002_L = { group = "YakushimaBoss002" },
+    YakushimaBoss002_R = { group = "YakushimaBoss002" },
+}
 
 -- Log every accepted damage event. Keep false on a live server.
 config.TraceDamage = false

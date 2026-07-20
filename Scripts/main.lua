@@ -7,7 +7,11 @@ local MOD = "[BossDPSBroadcast]"
 local unpack_args = table.unpack or unpack
 local sessions = {}
 local session_addresses = {}
+local session_actor_keys = {}
 local hooks = { damage = false, death = false, captured = false, captured_count = 0 }
+local cached_pal_utility = nil
+local cached_world_context = nil
+local non_boss_addresses = {}
 
 -- Native damage hooks may run in the middle of an Unreal call. They must not
 -- call UFunctions or retain references to the temporary event struct. The
@@ -26,6 +30,11 @@ local metrics = {
     processed = 0,
     invalid = 0,
     errors = 0,
+    non_boss_cache_hits = 0,
+    composite_joins = 0,
+    pal_metadata_cache_hits = 0,
+    source_owner_cache_hits = 0,
+    contributor_cache_hits = 0,
 }
 
 local function log(message)
@@ -307,13 +316,28 @@ local function copy_guid(value)
 end
 
 local function get_pal_utility()
+    if cached_pal_utility ~= nil then
+        return cached_pal_utility
+    end
     local utility = StaticFindObject("/Script/Pal.Default__PalUtility")
-    return is_valid(utility) and utility or nil
+    if is_valid(utility) then
+        cached_pal_utility = utility
+        return utility
+    end
+    return nil
 end
 
 local function find_world_context()
+    if cached_world_context ~= nil and is_valid(cached_world_context) then
+        return cached_world_context
+    end
     local world = FindFirstOf("PalGameStateInGame")
-    return is_valid(world) and world or nil
+    if is_valid(world) then
+        cached_world_context = world
+        return world
+    end
+    cached_world_context = nil
+    return nil
 end
 
 local function player_uid(player_state)
@@ -391,7 +415,52 @@ local function trainer_state(actor, utility)
     return state_from_player_actor(trainer, utility)
 end
 
-local function resolve_source_actor(candidate, utility, depth, seen)
+local function cached_source_owner(cache, identity)
+    if cache == nil or identity == nil or identity == "" then
+        return nil, nil, nil
+    end
+    local entry = cache[identity]
+    if entry == nil then
+        return nil, nil, nil
+    end
+    if not is_valid(entry.state) or not is_valid(entry.source_actor) then
+        cache[identity] = nil
+        return nil, nil, nil
+    end
+    metrics.source_owner_cache_hits = metrics.source_owner_cache_hits + 1
+    return entry.state, entry.source_kind, entry.source_actor
+end
+
+local function remember_source_owner(cache, identity, state, source_kind, source_actor)
+    if cache == nil or identity == nil or identity == "" or state == nil or source_actor == nil then
+        return
+    end
+    cache._order = cache._order or {}
+    cache._head = cache._head or 1
+    cache._tail = cache._tail or 0
+    local entry = cache[identity]
+    if entry == nil then
+        entry = {}
+        cache._tail = cache._tail + 1
+        cache._order[cache._tail] = { identity = identity, entry = entry }
+    end
+    entry.state = state
+    entry.source_kind = source_kind
+    entry.source_actor = source_actor
+    cache[identity] = entry
+
+    local max_entries = math.max(64, math.floor(to_number(config.MaxSourceOwnerCacheEntries)))
+    while cache._tail - cache._head + 1 > max_entries do
+        local expired = cache._order[cache._head]
+        cache._order[cache._head] = nil
+        cache._head = cache._head + 1
+        if expired ~= nil and cache[expired.identity] == expired.entry then
+            cache[expired.identity] = nil
+        end
+    end
+end
+
+local function resolve_source_actor(candidate, utility, depth, seen, cache)
     if depth > 3 or not is_valid(candidate) then
         return nil, nil, nil
     end
@@ -403,6 +472,11 @@ local function resolve_source_actor(candidate, utility, depth, seen)
         seen[identity] = true
     end
 
+    local cached_state, cached_kind, cached_actor = cached_source_owner(cache, identity)
+    if cached_state ~= nil then
+        return cached_state, cached_kind, cached_actor
+    end
+
     -- A real Pal character exposes CharacterParameterComponent. Checking this
     -- before generic player lookup prevents a mounted Pal from becoming a
     -- player row when a helper API resolves its trainer.
@@ -410,12 +484,14 @@ local function resolve_source_actor(candidate, utility, depth, seen)
     if component_ok and is_valid(component) then
         local state = trainer_state(candidate, utility)
         if state ~= nil then
+            remember_source_owner(cache, identity, state, "pal", candidate)
             return state, "pal", candidate
         end
     end
 
     local state = state_from_player_actor(candidate, utility)
     if state ~= nil then
+        remember_source_owner(cache, identity, state, "player", candidate)
         return state, "player", candidate
     end
 
@@ -425,8 +501,9 @@ local function resolve_source_actor(candidate, utility, depth, seen)
         local nested_ok, nested = safe_property(candidate, property_name)
         if nested_ok and is_valid(nested) then
             local nested_state, nested_kind, nested_source =
-                resolve_source_actor(nested, utility, depth + 1, seen)
+                resolve_source_actor(nested, utility, depth + 1, seen, cache)
             if nested_state ~= nil then
+                remember_source_owner(cache, identity, nested_state, nested_kind, nested_source)
                 return nested_state, nested_kind, nested_source
             end
         end
@@ -434,12 +511,13 @@ local function resolve_source_actor(candidate, utility, depth, seen)
 
     local fallback_state = trainer_state(candidate, utility)
     if fallback_state ~= nil then
+        remember_source_owner(cache, identity, fallback_state, "pal", candidate)
         return fallback_state, "pal", candidate
     end
     return nil, nil, nil
 end
 
-local function resolve_damage_owner(event, utility)
+local function resolve_damage_owner(event, utility, cache)
     local candidates = {}
     for _, field_name in ipairs({
         "damage_causer", "override_network_owner", "info_attacker", "attacker",
@@ -453,7 +531,7 @@ local function resolve_damage_owner(event, utility)
     for _, candidate in ipairs(candidates) do
         if candidate ~= nil then
             local state, source_kind, source_actor =
-                resolve_source_actor(candidate, utility, 0, seen)
+                resolve_source_actor(candidate, utility, 0, seen, cache)
             if state ~= nil then
                 return state, source_kind, source_actor
             end
@@ -488,6 +566,50 @@ local function normalized_boss_id(value)
     text = string.gsub(text, "^BP_", "")
     text = string.gsub(text, "^BOSS_", "")
     return text
+end
+
+local function composite_part_info(short_name)
+    local part_id = normalized_boss_id(short_name)
+    local definition = (config.CompositeBossParts or {})[part_id]
+    if type(definition) ~= "table" or tostring(definition.group or "") == "" then
+        return nil
+    end
+    return {
+        id = part_id,
+        group = tostring(definition.group),
+        terminal = definition.terminal == true,
+    }
+end
+
+local function composite_anchor_address(actor)
+    local current = actor
+    local last_address = nil
+    local seen = {}
+    for _ = 1, 4 do
+        local current_address = actor_address(current)
+        if current_address ~= nil then
+            if seen[current_address] then
+                break
+            end
+            seen[current_address] = true
+        end
+
+        local owner_ok, owner = safe_property(current, "Owner")
+        if not owner_ok or not is_valid(owner) then
+            local attach_ok, attach_parent = safe_call(current, "GetAttachParentActor")
+            owner = attach_ok and attach_parent or nil
+        end
+        if not is_valid(owner) then
+            break
+        end
+        local owner_address = actor_address(owner)
+        if owner_address == nil or owner_address == current_address then
+            break
+        end
+        last_address = owner_address
+        current = owner
+    end
+    return last_address
 end
 
 local function boss_display_name(actor, utility, short_name)
@@ -566,10 +688,15 @@ local function get_boss_info(actor, utility)
     end
     local short_name = actor_short_name(actor)
     local display_name = boss_display_name(actor, utility, short_name)
+    local composite = composite_part_info(short_name)
     return {
         key = full_name,
         address = actor_address(actor),
         name = tostring(display_name),
+        composite_group = composite and composite.group or nil,
+        composite_part = composite and composite.id or nil,
+        composite_terminal = composite and composite.terminal or false,
+        composite_anchor = composite and composite_anchor_address(actor) or nil,
     }
 end
 
@@ -866,14 +993,94 @@ local function queue_team_details(session, duration)
     end
 end
 
+local function bind_session_actor(session, boss_info)
+    session.actor_addresses = session.actor_addresses or {}
+    session.actor_keys = session.actor_keys or {}
+    session.actor_parts_by_address = session.actor_parts_by_address or {}
+    session.actor_parts_by_key = session.actor_parts_by_key or {}
+    session.composite_parts_seen = session.composite_parts_seen or {}
+
+    local part = nil
+    if boss_info.composite_part ~= nil then
+        part = {
+            id = boss_info.composite_part,
+            terminal = boss_info.composite_terminal == true,
+        }
+        session.composite_parts_seen[part.id] = true
+    end
+    if session.composite_anchor == nil and boss_info.composite_anchor ~= nil then
+        session.composite_anchor = boss_info.composite_anchor
+    end
+
+    if boss_info.address ~= nil then
+        session.actor_addresses[boss_info.address] = true
+        session_addresses[boss_info.address] = session
+        session.actor_parts_by_address[boss_info.address] = part
+    end
+    if boss_info.key ~= nil and boss_info.key ~= "" then
+        session.actor_keys[boss_info.key] = true
+        session_actor_keys[boss_info.key] = session
+        session.actor_parts_by_key[boss_info.key] = part
+    end
+end
+
+local function unbind_session_actor(session, address, key)
+    if address ~= nil then
+        session_addresses[address] = nil
+        if session.actor_addresses ~= nil then
+            session.actor_addresses[address] = nil
+        end
+    end
+    if key ~= nil and key ~= "" then
+        session_actor_keys[key] = nil
+        if session.actor_keys ~= nil then
+            session.actor_keys[key] = nil
+        end
+    end
+end
+
+local function find_composite_session(boss_info)
+    if boss_info.composite_group == nil then
+        return nil
+    end
+    local now = os.time()
+    local join_window = math.max(1, math.floor(to_number(config.CompositePartJoinWindowSeconds)))
+    local fallback = nil
+    for _, session in pairs(sessions) do
+        if session.finished ~= true and session.composite_group == boss_info.composite_group then
+            local anchor_matches = session.composite_anchor ~= nil
+                and boss_info.composite_anchor ~= nil
+                and session.composite_anchor == boss_info.composite_anchor
+            if anchor_matches then
+                return session
+            end
+
+            local anchor_conflicts = session.composite_anchor ~= nil
+                and boss_info.composite_anchor ~= nil
+                and session.composite_anchor ~= boss_info.composite_anchor
+            local part_is_new = boss_info.composite_part == nil
+                or session.composite_parts_seen[boss_info.composite_part] ~= true
+            if not anchor_conflicts and part_is_new
+                and now - session.started_at <= join_window
+                and (fallback == nil or session.started_at > fallback.started_at) then
+                fallback = session
+            end
+        end
+    end
+    return fallback
+end
+
 local function finish_session(session, reason)
     if session == nil or session.finished == true then
         return
     end
     session.finished = true
     sessions[session.key] = nil
-    if session.address ~= nil then
-        session_addresses[session.address] = nil
+    for address in pairs(session.actor_addresses or {}) do
+        session_addresses[address] = nil
+    end
+    for key in pairs(session.actor_keys or {}) do
+        session_actor_keys[key] = nil
     end
 
     local duration = math.max(1, os.time() - session.started_at)
@@ -1012,6 +1219,13 @@ local function start_session(boss_info)
         key = boss_info.key,
         address = boss_info.address,
         name = boss_info.name,
+        composite_group = boss_info.composite_group,
+        composite_anchor = boss_info.composite_anchor,
+        composite_parts_seen = {},
+        actor_addresses = {},
+        actor_keys = {},
+        actor_parts_by_address = {},
+        actor_parts_by_key = {},
         started_at = now,
         last_damage_at = now,
         last_progress_at = now,
@@ -1022,25 +1236,33 @@ local function start_session(boss_info)
         contributors = {},
         teams = {},
         pal_sources = {},
+        pal_actor_sources = {},
+        source_owner_cache = {},
+        player_state_entries = {},
         start_announced = false,
         finished = false,
     }
     sessions[session.key] = session
-    if session.address ~= nil then
-        session_addresses[session.address] = session
-    end
+    bind_session_actor(session, boss_info)
     log("session started boss=" .. session.name .. " key=" .. session.key)
     return session
 end
 
 local function record_damage(session, player_state, damage, source_kind, source_actor, utility)
-    local uid = player_uid(player_state)
-    local key = guid_key(uid)
-    if key == nil then
-        return
+    local state_address = actor_address(player_state)
+    local key = state_address ~= nil and session.player_state_entries[state_address] or nil
+    local entry = key ~= nil and session.contributors[key] or nil
+    local uid = nil
+    if entry ~= nil then
+        metrics.contributor_cache_hits = metrics.contributor_cache_hits + 1
+    else
+        uid = player_uid(player_state)
+        key = guid_key(uid)
+        if key == nil then
+            return
+        end
+        entry = session.contributors[key]
     end
-
-    local entry = session.contributors[key]
     if entry == nil then
         entry = {
             uid = copy_guid(uid),
@@ -1053,8 +1275,9 @@ local function record_damage(session, player_state, damage, source_kind, source_
         }
         entry.team_key, entry.team_name = player_team_info(player_state, uid, entry.name)
         session.contributors[key] = entry
-    else
-        entry.name = player_name(player_state)
+    end
+    if state_address ~= nil then
+        session.player_state_entries[state_address] = key
     end
     entry.damage = entry.damage + damage
     entry.progress_damage = entry.progress_damage + damage
@@ -1073,8 +1296,20 @@ local function record_damage(session, player_state, damage, source_kind, source_
     team.hits = team.hits + 1
 
     if source_kind == "pal" then
-        local source_key, display_name = pal_source_info(source_actor, utility)
-        local pal = session.pal_sources[source_key]
+        local actor_source_key = actor_address(source_actor) or actor_full_name(source_actor)
+        local source_key = session.pal_actor_sources[actor_source_key]
+        local pal = source_key ~= nil and session.pal_sources[source_key] or nil
+        local display_name
+        if pal ~= nil then
+            display_name = pal.name
+            metrics.pal_metadata_cache_hits = metrics.pal_metadata_cache_hits + 1
+        else
+            source_key, display_name = pal_source_info(source_actor, utility)
+            if actor_source_key ~= nil and actor_source_key ~= "" then
+                session.pal_actor_sources[actor_source_key] = source_key
+            end
+            pal = session.pal_sources[source_key]
+        end
         if pal == nil then
             pal = {
                 name = display_name,
@@ -1204,35 +1439,86 @@ local function publish_progress()
     end
 end
 
-local function process_damage_event(event)
-    if not is_valid(event.attacker) or not is_valid(event.defender) then
-        metrics.invalid = metrics.invalid + 1
-        return
+local function non_boss_cache_hit(address)
+    if address == nil then
+        return false
     end
+    local expires_at = non_boss_addresses[address]
+    if expires_at == nil then
+        return false
+    end
+    if expires_at < os.time() then
+        non_boss_addresses[address] = nil
+        return false
+    end
+    metrics.non_boss_cache_hits = metrics.non_boss_cache_hits + 1
+    return true
+end
 
-    local utility = get_pal_utility()
-    if utility == nil then
-        metrics.invalid = metrics.invalid + 1
+local function remember_non_boss(address)
+    if address == nil then
         return
     end
-    local state, source_kind, source_actor = resolve_damage_owner(event, utility)
-    if state == nil then
+    local ttl = math.max(5, math.floor(to_number(config.NonBossCacheSeconds)))
+    non_boss_addresses[address] = os.time() + ttl
+end
+
+local function process_damage_event(event)
+    if not is_valid(event.defender) then
+        metrics.invalid = metrics.invalid + 1
         return
     end
 
     local address = actor_address(event.defender)
+    if non_boss_cache_hit(address) then
+        return
+    end
+
     local key = actor_full_name(event.defender)
     if key == "" then
         metrics.invalid = metrics.invalid + 1
         return
     end
-    local session = address ~= nil and session_addresses[address] or sessions[key]
+    local session = address ~= nil and session_addresses[address] or session_actor_keys[key]
+    local utility = nil
     if session == nil then
-        local boss_info = get_boss_info(event.defender, utility)
-        if boss_info == nil then
+        utility = get_pal_utility()
+        if utility == nil then
+            metrics.invalid = metrics.invalid + 1
             return
         end
-        session = start_session(boss_info)
+        local boss_info = get_boss_info(event.defender, utility)
+        if boss_info == nil then
+            remember_non_boss(address)
+            return
+        end
+        session = find_composite_session(boss_info)
+        if session ~= nil then
+            bind_session_actor(session, boss_info)
+            metrics.composite_joins = metrics.composite_joins + 1
+            log(string.format(
+                "composite part joined boss=%s group=%s part=%s",
+                session.name,
+                tostring(boss_info.composite_group),
+                tostring(boss_info.composite_part)
+            ))
+        else
+            session = start_session(boss_info)
+        end
+    end
+
+    if not is_valid(event.attacker) then
+        metrics.invalid = metrics.invalid + 1
+        return
+    end
+    utility = utility or get_pal_utility()
+    if utility == nil then
+        metrics.invalid = metrics.invalid + 1
+        return
+    end
+    local state, source_kind, source_actor = resolve_damage_owner(event, utility, session.source_owner_cache)
+    if state == nil then
+        return
     end
     record_damage(session, state, event.damage, source_kind, source_actor or event.attacker, utility)
 end
@@ -1240,6 +1526,8 @@ end
 local function process_finish_event(event)
     local candidates = event.candidates or { event.actor }
     local session = nil
+    local matched_address = nil
+    local matched_key = nil
     for _, actor in ipairs(candidates) do
         if actor ~= nil then
             -- GetAddress is a UE4SS wrapper operation and does not dereference
@@ -1247,17 +1535,34 @@ local function process_finish_event(event)
             -- invalidated the actor. Different 1.0 capture events put the
             -- captured character at different argument positions.
             local address = actor_address(actor)
+            if address ~= nil then
+                non_boss_addresses[address] = nil
+            end
+            local key = is_valid(actor) and actor_full_name(actor) or nil
             session = address ~= nil and session_addresses[address] or nil
-            if session == nil and is_valid(actor) then
-                local key = actor_full_name(actor)
-                session = key ~= "" and sessions[key] or nil
+            if session == nil and key ~= nil then
+                session = key ~= "" and session_actor_keys[key] or nil
             end
             if session ~= nil then
+                matched_address = address
+                matched_key = key
                 break
             end
         end
     end
     if session ~= nil then
+        if event.reason == "defeated" and session.composite_group ~= nil then
+            local part = (matched_address ~= nil and session.actor_parts_by_address[matched_address])
+                or (matched_key ~= nil and session.actor_parts_by_key[matched_key])
+            if part ~= nil and part.terminal ~= true then
+                unbind_session_actor(session, matched_address, matched_key)
+                log(string.format(
+                    "composite part ended boss=%s group=%s part=%s; encounter remains active",
+                    session.name, tostring(session.composite_group), tostring(part.id)
+                ))
+                return
+            end
+        end
         finish_session(session, event.reason)
     elseif event.reason == "captured" then
         log(string.format("capture event did not match an active boss session; candidates=%d", #candidates))
@@ -1432,6 +1737,11 @@ local function cleanup_sessions()
         return
     end
     local now = os.time()
+    for address, expires_at in pairs(non_boss_addresses) do
+        if expires_at < now then
+            non_boss_addresses[address] = nil
+        end
+    end
     local expired = {}
     for _, session in pairs(sessions) do
         if session.finished ~= true and now - session.last_damage_at >= timeout then
@@ -1552,7 +1862,7 @@ local function register_hooks()
 
     if hooks.damage and hooks.death then
         log(string.format(
-            "loaded v3.0.0; dps=%s progress=%s details=%s comments=%s; captured_hooks=%d",
+            "loaded v3.1.0; dps=%s progress=%s details=%s comments=%s; captured_hooks=%d",
             tostring(config.EnableDPSRecording ~= false),
             tostring(config.EnableProgressReports == true),
             tostring(config.EnableTeamDetails == true),
