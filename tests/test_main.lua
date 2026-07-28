@@ -71,6 +71,7 @@ local player_two_state = object({
     PlayerNamePrivate = "Bob",
     GuildBelongTo = guild_two,
 }, { GetAddress = function() return 9202 end })
+local local_player_controller = object({ PlayerState = player_one_state })
 
 local next_actor_address = 10000
 
@@ -130,6 +131,13 @@ local normal_target = actor("BP_Sheep_C_4", {
     }),
 })
 local world = object()
+local gameplay_statics = object({}, {
+    GetPlayerController = function(_, context, index)
+        assert(context == world, "unexpected local-player world context")
+        assert(index == 0, "local player must use controller index zero")
+        return local_player_controller
+    end,
+})
 
 local trainer_by_actor = {}
 trainer_by_actor[player_two_pal] = player_two
@@ -187,10 +195,27 @@ local utility = object({}, {
     end,
 })
 
+local internationalization_library = object({}, {
+    GetCurrentLanguage = function()
+        return "zh-Hans-CN"
+    end,
+    GetLocalizedLanguage = function()
+        return "zh"
+    end,
+})
+
 function StaticFindObject(path)
     require_game_thread("StaticFindObject")
-    assert(path == "/Script/Pal.Default__PalUtility")
-    return utility
+    if path == "/Script/Pal.Default__PalUtility" then
+        return utility
+    end
+    if path == "/Script/Engine.Default__GameplayStatics" then
+        return gameplay_statics
+    end
+    if path == "/Script/Engine.Default__KismetInternationalizationLibrary" then
+        return internationalization_library
+    end
+    error("unexpected StaticFindObject path: " .. tostring(path))
 end
 
 function FindFirstOf(type_name)
@@ -200,7 +225,8 @@ function FindFirstOf(type_name)
 end
 
 function RegisterHook(path, callback)
-    assert(phase == "bootstrap", "RegisterHook must run during bootstrap")
+    assert(phase == "bootstrap" or phase == "game",
+        "RegisterHook must run during bootstrap or on the game thread")
     local allowed = {
         ["/Script/Pal.PalEventNotify_Character:OnCharacterDamaged_ServerInternal"] = true,
         ["/Script/Pal.PalEventNotify_Character:OnCharacterDead_ServerInternal"] = true,
@@ -312,6 +338,7 @@ assert(runtime_config.BroadcastStart == true, "start reports should default to e
 assert(runtime_config.EnableProgressReports == false, "progress reports should default to disabled")
 assert(runtime_config.EnableDetailedAwards == false, "detailed awards should default to disabled")
 assert(runtime_config.EnableTeamDetails == false, "team details should default to disabled")
+assert(runtime_config.LocalOnlyMessages == false, "server package should not default to local-only messages")
 -- Most existing scenarios also exercise the enabled commentary branches.
 runtime_config.EnableFunComments = true
 runtime_config.BroadcastStart = true
@@ -793,6 +820,37 @@ assert(string.find(parallel_joined, "团队伤害 333", 1, true) ~= nil,
 assert(string.find(parallel_joined, "团队伤害 999", 1, true) ~= nil,
     "second composite encounter mixed with another instance")
 
+-- Workshop/single-player mode sends reports only to the local participant,
+-- even if a listen-server encounter also contains a remote contributor.
+local local_only_boss = boss_actor("BP_RaidBoss_LocalOnly_C_350")
+local alice_before_local_only = #delivered
+local bob_inbox = delivered_by_uid[test_guid_key(uid_two)]
+local bob_before_local_only = #bob_inbox
+local previous_fun_comments = runtime_config.EnableFunComments
+local previous_progress = runtime_config.EnableProgressReports
+local previous_details = runtime_config.EnableTeamDetails
+runtime_config.LocalOnlyMessages = true
+runtime_config.EnableFunComments = false
+runtime_config.EnableProgressReports = false
+runtime_config.EnableTeamDetails = true
+damage(player_one, local_only_boss, 600)
+damage(player_two_pal, local_only_boss, 400)
+death(local_only_boss)
+run_game_tasks()
+run_delayed_tasks()
+local local_only_messages = {}
+for index = alice_before_local_only + 1, #delivered do
+    local_only_messages[#local_only_messages + 1] = delivered[index]
+end
+assert(string.find(table.concat(local_only_messages, "\n"), "团队伤害 1,000", 1, true) ~= nil,
+    "local player did not receive single-player result")
+assert(#bob_inbox == bob_before_local_only,
+    "remote contributor received a local-only single-player result")
+runtime_config.LocalOnlyMessages = false
+runtime_config.EnableFunComments = previous_fun_comments
+runtime_config.EnableProgressReports = previous_progress
+runtime_config.EnableTeamDetails = previous_details
+
 -- Repeated multi-hit Pal damage should reuse ownership, contributor, and Pal
 -- metadata instead of calling the full reflected lookup chain for every hit.
 local performance_boss = boss_actor("BP_RaidBoss_Performance_C_401")
@@ -854,9 +912,84 @@ assert(normal_drain_accesses < 20000,
 run_delayed_tasks()
 joined = table.concat(delivered, "\n")
 assert(string.find(joined, "击败了 RaidBoss_Stress｜用时 1秒｜团队DPS 1｜团队伤害 1", 1, true) ~= nil, "death was lost behind burst traffic")
+
+-- Native bridge simulation: one aggregated bucket represents many hits. Lua
+-- must preserve the exact damage while carrying the hit count into tie-break
+-- metadata, and it must classify the target for the C++ fast path.
+local native_boss = boss_actor("BP_RaidBoss_Native_C_501")
+local native_record_index = 0
+local native_classifications = {}
+BossDPSNativeDrainOne = function()
+    native_record_index = native_record_index + 1
+    if native_record_index == 1 then
+        return true, player_one, native_boss, 777, nil, nil, nil, 123, "0xABC"
+    end
+    return false
+end
+BossDPSNativeClassifyTarget = function(target_key, state)
+    native_classifications[#native_classifications + 1] = target_key .. ":" .. state
+end
+BossDPSBroadcastTestApi.hooks.damage_mode = "native"
+local native_hits_before = BossDPSBroadcastTestApi.metrics.native_hits
+phase = "game"
+BossDPSBroadcastTestApi.drain_native_damage()
+phase = "bootstrap"
+local native_session
+for _, candidate in pairs(BossDPSBroadcastTestApi.sessions) do
+    if candidate.name == "RaidBoss_Native" then
+        native_session = candidate
+        break
+    end
+end
+assert(native_session ~= nil, "native aggregate did not start a boss session")
+assert(native_session.total_damage == 777, "native aggregate changed total damage")
+local native_contributor
+for _, contributor in pairs(native_session.contributors) do
+    native_contributor = contributor
+end
+assert(native_contributor ~= nil and native_contributor.hits == 123,
+    "native aggregate did not preserve hit count")
+assert(BossDPSBroadcastTestApi.metrics.native_hits - native_hits_before == 123,
+    "native hit metric is incorrect")
+assert(native_classifications[1] == "0xABC:boss",
+    "native target was not classified as a boss")
+death(native_boss)
+run_game_tasks()
+run_delayed_tasks()
+assert(native_classifications[#native_classifications] == "0xABC:unknown",
+    "finished native target classification was not released")
+
+-- A runtime failure must fail open by default, but fail closed when an
+-- administrator explicitly requires the native collector.
+BossDPSNativeDrainOne = function()
+    return false, "faulted"
+end
+runtime_config.RequireNativeCollector = false
+BossDPSBroadcastTestApi.hooks.damage = true
+BossDPSBroadcastTestApi.hooks.damage_mode = "native"
+phase = "game"
+BossDPSBroadcastTestApi.drain_native_damage()
+phase = "bootstrap"
+assert(BossDPSBroadcastTestApi.hooks.damage_mode == "lua-fallback",
+    "native runtime fault did not activate Lua fallback")
+assert(BossDPSBroadcastTestApi.hooks.damage == true,
+    "Lua fallback was not marked active after native runtime fault")
+
+runtime_config.RequireNativeCollector = true
+BossDPSBroadcastTestApi.hooks.damage = true
+BossDPSBroadcastTestApi.hooks.damage_mode = "native"
+phase = "game"
+BossDPSBroadcastTestApi.drain_native_damage()
+phase = "bootstrap"
+assert(BossDPSBroadcastTestApi.hooks.damage_mode == "required-native-faulted",
+    "required native runtime fault did not disable damage recording")
+assert(BossDPSBroadcastTestApi.hooks.damage == false,
+    "required native runtime fault left damage recording enabled")
+runtime_config.RequireNativeCollector = false
+
 assert(BossDPSBroadcastTestApi.metrics.errors == 0, "unexpected processing errors")
 assert(#delivered_by_uid[test_guid_key(uid_spectator)] == 0, "spectator received any participant-only report")
 
 assert(#BossDPSBroadcastTestApi.sessions == 0, "sessions table must be map-like")
 assert(original_os_time ~= nil)
-print("BossDPSBroadcast v3.1.0 integration/thread/lifetime/stress tests passed")
+print("BossDPSBroadcast v3.3.0 integration/thread/lifetime/native/stress tests passed")

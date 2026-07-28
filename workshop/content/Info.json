@@ -1,0 +1,23 @@
+{
+  "ModName": "不要查我DPS",
+  "PackageName": "PalBossDPSBroadcastSP",
+  "Thumbnail": "thumbnail.png",
+  "Version": "1.1.0",
+  "DebugMode": false,
+  "MinRevision": 82182,
+  "Author": "AsahiChan-Game",
+  "Dependencies": [
+    "UE4SSExperimentalPW"
+  ],
+  "Tags": [
+    "UE4SS"
+  ],
+  "InstallRule": [
+    {
+      "Type": "Lua",
+      "Targets": [
+        "./Scripts"
+      ]
+    }
+  ]
+}

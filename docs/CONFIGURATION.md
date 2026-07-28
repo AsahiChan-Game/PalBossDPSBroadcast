@@ -10,6 +10,7 @@
 
 ```lua
 config.EnableDPSRecording = true
+config.Language = "auto"
 config.BroadcastStart = true
 config.EnableProgressReports = false
 config.EnableFunComments = false
@@ -19,6 +20,31 @@ config.MarkTopAsMVP = true
 ```
 
 三位玩家参与时，通常发送一行开始确认和四行最终结算。
+
+## 语言
+
+`Language = "auto"` 会读取 Palworld 当前语言。也可以明确指定：
+
+```lua
+config.Language = "fr"
+```
+
+支持 `en`、`zh-CN`、`zh-TW`、`ja`、`fr`、`it`、`de`、`es-ES`、`pt-BR`、`ru`、`ko`、`id`、`es-419`、`th`、`tr`、`vi` 和 `pl`。无法识别时回退英语。趣味点评梗池仍仅提供简体中文；其他语言即使开启该开关，也只显示完整本地化的核心战报。
+
+## 原生采集器
+
+专用服务器 v3.2 推荐保持：
+
+```lua
+config.PreferNativeCollector = true
+config.RequireNativeCollector = false
+config.NativeDrainIntervalMilliseconds = 50
+config.NativeMaxBucketsPerDrain = 512
+```
+
+正常启动日志应显示 `collector=native`。如果 DLL 缺失、UE4SS ABI 不匹配或伤害结构反射失败，会显示 `collector=lua-fallback`，并继续使用旧 Lua 钩子。`RequireNativeCollector=true` 只适合性能诊断；开启后原生组件不可用会直接禁止伤害统计。
+
+`NativeDrainIntervalMilliseconds` 控制 Lua 多久拉取一次聚合结果，通常不应低于 50。`NativeMaxBucketsPerDrain` 限制的是不同目标/来源组合，不是命中次数；同一个多段技能的数百次命中通常只占一个桶。
 
 ### 实时战况模式
 
@@ -58,11 +84,17 @@ config.EnableDPSRecording = false
 
 ```lua
 config.BossNameOverrides = {
-    InternalBossId = "中文Boss名",
+    InternalBossId = {
+        en = "English Boss Name",
+        ["zh-CN"] = "中文Boss名",
+    },
 }
 
 config.PalNameOverrides = {
-    InternalPalId = "中文帕鲁名",
+    InternalPalId = {
+        en = "English Pal Name",
+        ["zh-CN"] = "中文帕鲁名",
+    },
 }
 ```
 
@@ -80,7 +112,7 @@ config.NonBossCacheSeconds = 60
 config.TraceDamage = false
 ```
 
-队列满时仅丢弃额外伤害事件，结束事件仍会保留。`TraceDamage` 会产生大量日志，只建议在短时间诊断时开启。
+这些队列参数只约束纯 Lua 回退路径及死亡/捕捉事件。原生路径使用独立的聚合上限。队列满时仅丢弃额外伤害事件，结束事件仍会保留。`TraceDamage` 会产生大量日志，只建议在短时间诊断时开启。
 
 ## 复合 Boss 部位
 

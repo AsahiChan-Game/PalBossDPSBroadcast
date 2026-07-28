@@ -1,8 +1,10 @@
-# PalBossDPSBroadcast v3.1.0
+# PalBossDPSBroadcast v3.3.0
 
-适用于 Palworld 1.0 专用服务器的 UE4SS Lua Boss 伤害统计模组。
+适用于 Palworld 1.0 专用服务器的 UE4SS Boss 伤害统计模组。v3.2 将高频伤害采集移到可选 C++ 聚合器；v3.3 新增 Palworld 官方全部 17 种语言的自动本地化。原生组件不可用时默认自动回退到纯 Lua。
 
 服务端自动统计 Boss 战中的团队伤害、玩家综合伤害、占比和 DPS，并通过游戏聊天窗口向本场实际参与者发送结算。客户端无需安装。
+
+仓库同时提供面向 Steam 创意工坊的单机发行包。单机版复用同一统计核心，但只向本机玩家发送聊天结果。构建和适用边界见 [Workshop 说明](workshop/README.md)。
 
 ## 默认效果
 
@@ -36,25 +38,30 @@
 ## 环境要求
 
 - Windows Palworld Dedicated Server 1.0
-- UE4SS 3.x
+- UE4SS 3.0.1 `c2ac246`（原生采集器二进制的精确 ABI 目标）
 - 服务端文件访问权限
 
-Palworld 或 UE4SS 更新后，反射函数名称可能变化。更新游戏前建议备份当前可用版本。
+Lua 回退路径仍可兼容其他 UE4SS 3.x，但随 Release 提供的 C++ DLL 只支持上面的精确版本。升级 Palworld 或 UE4SS 后应重新编译原生组件；不匹配时不要强行加载旧 DLL。
 
 ## 安装
 
 1. 停止专用服务器。
-2. 安装并确认 UE4SS 可以正常加载 Lua 模组。
+2. 安装并确认 UE4SS 版本为 3.0.1 `c2ac246`。
 3. 下载 Release 压缩包并解压。
-4. 将整个 `BossDPSBroadcast` 文件夹复制到：
+4. 将压缩包中的两个文件夹一起复制到：
 
    ```text
-   PalServer/Pal/Binaries/Win64/ue4ss/Mods/BossDPSBroadcast
+   PalServer/Pal/Binaries/Win64/ue4ss/Mods/
    ```
 
 5. 确认目录结构如下：
 
    ```text
+   BossDPSNativeCollector/
+   ├─ enabled.txt
+   └─ dlls/
+      └─ main.dll
+
    BossDPSBroadcast/
    ├─ enabled.txt
    └─ Scripts/
@@ -66,10 +73,10 @@ Palworld 或 UE4SS 更新后，反射函数名称可能变化。更新游戏前�
 6. 启动服务器，在 `ue4ss/UE4SS.log` 中搜索：
 
    ```text
-   [BossDPSBroadcast] loaded v3.1.0
+   [BossDPSBroadcast] loaded v3.3.0; collector=native
    ```
 
-更新旧版本时，先备份自己的 `Scripts/config.lua`，再覆盖模组文件并重新应用配置。
+若显示 `collector=lua-fallback`，统计仍可工作，但高频伤害仍走旧 Lua 路径。更新旧版本时，先备份自己的 `Scripts/config.lua`，再覆盖模组文件并重新应用配置。
 
 ## 配置
 
@@ -78,6 +85,12 @@ Palworld 或 UE4SS 更新后，反射函数名称可能变化。更新游戏前�
 | 配置项 | 默认值 | 作用 |
 |---|---:|---|
 | `EnableDPSRecording` | `true` | 总开关；关闭后不记录也不发送任何战报 |
+| `Language` | `"auto"` | 自动跟随 Palworld 语言，也可显式指定 `en`、`zh-CN`、`fr` 等 |
+| `PreferNativeCollector` | `true` | 可用时优先使用 C++ 聚合采集 |
+| `RequireNativeCollector` | `false` | 原生组件不可用时禁止 Lua 回退；一般不要开启 |
+| `NativeDrainIntervalMilliseconds` | `50` | Lua 拉取原生聚合桶的间隔 |
+| `NativeMaxBucketsPerDrain` | `512` | 单轮最多处理的聚合来源数量 |
+| `LocalOnlyMessages` | `false` | 仅单机/房主发行包使用；只向本机参与者显示战报 |
 | `BroadcastStart` | `true` | 首次有效命中时发送一行开始确认 |
 | `EnableProgressReports` | `false` | 发送周期性实时战况 |
 | `ProgressIntervalSeconds` | `10` | 实时战况间隔秒数 |
@@ -110,15 +123,15 @@ Palworld 或 UE4SS 更新后，反射函数名称可能变化。更新游戏前�
 
 ### 完全没有战报
 
-检查 `enabled.txt` 是否存在、`EnableDPSRecording` 是否为 `true`，并在 `UE4SS.log` 中确认出现 `loaded v3.1.0`。
+检查两个 `enabled.txt` 是否存在、`EnableDPSRecording` 是否为 `true`，并在 `UE4SS.log` 中确认出现 `loaded v3.3.0`。
 
 ### 别人的 Boss 战也发给我，或三个人重复三遍
 
-这是旧版将单个 `FGuid` 错当成收件人数组导致的问题。v3.0.0 及以上版本使用一次调用中的完整 `TArray<FGuid>`。确认日志加载的是 v3.1.0，而不是旧版本。
+这是旧版将单个 `FGuid` 错当成收件人数组导致的问题。v3.0.0 及以上版本使用一次调用中的完整 `TArray<FGuid>`。确认日志加载的是 v3.3.0，而不是旧版本。
 
 ### 月亮领主出现四次统计或战斗时明显卡顿
 
-v3.1.0 会将身体、头部和左右部件合并成一场遭遇，并缓存重复的攻击来源与帕鲁名称查询。确认日志只出现一次 `session started boss=月亮领主`，其他部位应显示为 `composite part joined`。
+v3.3.0 会先在 C++ 中合并同一目标/来源的高频命中；Lua 再将身体、头部和左右部件合并成一场遭遇。确认日志显示 `collector=native`，并且只出现一次 `session started boss=月亮领主`。
 
 ### 捕捉后不立即结算
 
