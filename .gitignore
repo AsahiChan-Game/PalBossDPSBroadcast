@@ -1,7 +1,9 @@
 *.log
 *.dmp
 *.zip
+*.obj
 dist/
+native/build*/
 .idea/
 .vscode/
 enabled.txt.disabled*

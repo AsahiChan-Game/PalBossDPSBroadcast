@@ -1,32 +1,23 @@
 local config = {}
 
 -- Master switch for all boss damage recording and chat reports.
--- Changing this setting requires a server restart.
+-- Changing this setting requires restarting Palworld.
 config.EnableDPSRecording = true
 
--- Chat report language. "auto" follows Palworld's current language when it
--- can be detected. You may also use any supported code such as en, zh-CN,
--- zh-TW, ja, fr, it, de, es-ES, pt-BR, ru, ko, id, es-419, th, tr, vi or pl.
+-- "auto" follows the language selected in Palworld. Supported values:
+-- en, zh-CN, zh-TW, ja, fr, it, de, es-ES, pt-BR, ru, ko, id, es-419,
+-- th, tr, vi and pl.
 config.Language = "auto"
-
--- Prefer the optional C++ collector when it is installed and ABI-compatible.
--- The native layer aggregates high-frequency hits before Lua sees them.
--- Keep RequireNativeCollector false so an incompatible/missing DLL falls back
--- to the proven Lua hook instead of silently disabling all damage recording.
-config.PreferNativeCollector = true
-config.RequireNativeCollector = false
-config.NativeDrainIntervalMilliseconds = 50
-config.NativeMaxBucketsPerDrain = 512
 
 -- Single-player/host distribution switch. When true, chat reports are sent
 -- only to the local player. The dedicated-server package keeps this false.
-config.LocalOnlyMessages = false
+config.LocalOnlyMessages = true
 
 -- Prefix used for every participant-only system chat message.
 config.MessagePrefix = "[BossDPS]"
 
 -- Optional components. Compact, low-noise output is the public default.
--- Change a switch, then restart the server once to apply it.
+-- Change a switch, then restart Palworld once to apply it.
 config.BroadcastStart = true
 config.EnableProgressReports = false
 config.EnableDetailedAwards = false
@@ -48,7 +39,7 @@ config.TeamDetailMaxRows = 12
 -- Fun battle comments: progress comments only appear when a threshold is met;
 -- every final result receives one comment when enabled. Changing this setting
 -- requires a server restart.
-config.EnableFunComments = false
+config.EnableFunComments = true
 
 -- Delay between result lines to avoid flooding the chat feed.
 config.MessageIntervalMilliseconds = 1000
@@ -83,7 +74,7 @@ config.CompositeBossParts = {
     YakushimaBoss002_R = { group = "YakushimaBoss002" },
 }
 
--- Log every accepted damage event. Keep false on a live server.
+-- Log every accepted damage event. Keep false during normal play.
 config.TraceDamage = false
 
 -- If reflected boss flags are unavailable, use these actor-name fragments.
@@ -94,7 +85,7 @@ config.BossNamePatterns = {
     "gym_",
 }
 
--- Localized fallback names keyed by a normalized character/actor id. The mod
+-- Chinese fallback names keyed by a normalized character/actor id. The mod
 -- first asks Palworld's localization database, then checks this table, and
 -- never displays a long /Game/... object path.
 config.BossNameOverrides = {
@@ -104,7 +95,7 @@ config.BossNameOverrides = {
     DarkScorpion_BOSS = { en = "Dark Scorpion", ["zh-CN"] = "冥铠蝎", ["zh-TW"] = "冥鎧蠍" },
 }
 
--- Optional localized species-name fallbacks for owned Pals. Player-assigned
+-- Optional Chinese species-name fallbacks for owned Pals. Player-assigned
 -- nicknames still take priority over these names.
 config.PalNameOverrides = {
     PinkCat = { en = "Cattiva", ["zh-CN"] = "捣蛋猫", ["zh-TW"] = "搗蛋貓" },
