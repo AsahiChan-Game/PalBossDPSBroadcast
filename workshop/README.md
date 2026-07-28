@@ -37,14 +37,14 @@ powershell -ExecutionPolicy Bypass -File .\workshop\upload_workshop.ps1 `
   -SteamAccountName "你的Steam登录名"
 ```
 
-脚本默认以私密可见性创建项目，方便先完成游戏内验证。SteamCMD 会在当前终端要求输入密码和 Steam Guard 验证码；脚本不接收、保存或将密码放入命令行。上传成功后会自动记录 Published File ID。更新现有项目时保留原可见性参数。
+脚本默认使用公开可见性（`Visibility = 0`）。SteamCMD 会在当前终端要求输入密码和 Steam Guard 验证码；脚本不接收、保存或将密码放入命令行。上传成功后会自动记录 Published File ID。
 
-确认页面内容和依赖无误后：
+上传后确认：
 
 1. 接受 Steam Workshop Legal Agreement；
 2. 在项目页面将 UE4SS item `3625223587` 设置为 Required Item；
 3. 完成单人世界测试；
-4. 再将可见性调整为公开。
+4. 项目可见性仍为“公开”。
 
 ## 依赖
 
