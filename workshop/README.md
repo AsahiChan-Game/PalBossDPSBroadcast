@@ -33,11 +33,10 @@ SteamCMD 更新英语回退内容和 Mod 文件；其余语言使用创意工坊
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\workshop\upload_workshop.ps1 `
-  -SteamCmdPath "C:\steamcmd\steamcmd.exe" `
-  -SteamAccountName "你的Steam登录名"
+  -SteamCmdPath "C:\steamcmd\steamcmd.exe"
 ```
 
-脚本默认使用公开可见性（`Visibility = 0`）。SteamCMD 会在当前终端要求输入密码和 Steam Guard 验证码；脚本不接收、保存或将密码放入命令行。上传成功后会自动记录 Published File ID。
+脚本会依次交互询问 Steam 登录名、密码和 Steam Guard 验证码；这些内容不会写入仓库或命令行。也可以显式传入 `-SteamAccountName "你的Steam登录名"`。脚本默认使用公开可见性（`Visibility = 0`），上传成功后会自动记录 Published File ID。
 
 上传后确认：
 

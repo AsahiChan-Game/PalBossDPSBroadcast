@@ -2,8 +2,7 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$SteamCmdPath,
 
-    [Parameter(Mandatory = $true)]
-    [string]$SteamAccountName,
+    [string]$SteamAccountName = "",
 
     [ValidateSet(0, 1, 2)]
     [int]$Visibility = 0
@@ -22,6 +21,12 @@ $buildScript = Join-Path $workshopDirectory "build_workshop.ps1"
 
 if (-not (Test-Path -LiteralPath $SteamCmdPath -PathType Leaf)) {
     throw "steamcmd.exe not found: $SteamCmdPath"
+}
+if ([string]::IsNullOrWhiteSpace($SteamAccountName)) {
+    $SteamAccountName = Read-Host "Steam login account name"
+}
+if ([string]::IsNullOrWhiteSpace($SteamAccountName)) {
+    throw "Steam account name is required"
 }
 
 & powershell -ExecutionPolicy Bypass -File $buildScript
