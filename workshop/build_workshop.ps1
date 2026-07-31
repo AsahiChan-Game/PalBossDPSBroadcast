@@ -19,7 +19,7 @@ $info = Get-Content -LiteralPath $infoPath -Raw -Encoding UTF8 | ConvertFrom-Jso
 $expectedWorkshopTitle = -join @([char]0x4E0D, [char]0x8981, [char]0x67E5, [char]0x6211, "D", "P", "S")
 if ($info.ModName -ne $expectedWorkshopTitle) { throw "Unexpected Workshop ModName" }
 if ($info.PackageName -ne "PalBossDPSBroadcastSP") { throw "Unexpected Workshop PackageName" }
-if ($info.Version -ne "1.1.0") { throw "Unexpected Workshop version" }
+if ($info.Version -ne "1.2.0") { throw "Unexpected Workshop version" }
 if ($info.Dependencies -notcontains "UE4SSExperimentalPW") { throw "UE4SS dependency missing" }
 if ($info.InstallRule.Count -ne 1 -or $info.InstallRule[0].Type -ne "Lua") { throw "Lua InstallRule missing" }
 
@@ -27,7 +27,8 @@ $configPath = Join-Path $contentScripts "config.lua"
 $configText = Get-Content -LiteralPath $configPath -Raw -Encoding UTF8
 foreach ($requiredSetting in @(
     "config.LocalOnlyMessages = true",
-    "config.EnableFunComments = true"
+    "config.EnableFunComments = true",
+    "config.EnablePalDamageBreakdown = true"
 )) {
     if (-not $configText.Contains($requiredSetting)) { throw "Workshop config missing: $requiredSetting" }
 }
@@ -50,7 +51,7 @@ foreach ($localePath in Get-ChildItem -LiteralPath $contentLocales -Filter "*.lu
 }
 
 New-Item -ItemType Directory -Path $distDirectory -Force | Out-Null
-$zipPath = Join-Path $distDirectory "PalBossDPSBroadcastSP-Workshop-v1.1.0.zip"
+$zipPath = Join-Path $distDirectory "PalBossDPSBroadcastSP-Workshop-v1.2.0.zip"
 Compress-Archive -Path (Join-Path $contentDirectory "*") -DestinationPath $zipPath -CompressionLevel Optimal -Force
 
 Write-Host "Workshop package ready: $zipPath"

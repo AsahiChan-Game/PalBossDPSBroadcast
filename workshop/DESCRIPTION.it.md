@@ -21,6 +21,9 @@ Colpisci un Boss per avviare automaticamente il conteggio. Il risultato appare n
 [*]Entra in un mondo in giocatore singolo e attacca un Boss.
 [/olist]
 
+[h2]Danno per ogni Pal[/h2]
+Dalla v1.2.0 il riepilogo di personaggio e singoli Pal è attivo per impostazione predefinita. Modifica [code]config.EnablePalDamageBreakdown = true[/code] e usa [code]false[/code] per un risultato più breve. Le arene dei Boss sono supportate, l'arena PvP no.
+
 [h2]Compatibilità[/h2]
 [list]
 [*][b]Supportato:[/b] mondi in giocatore singolo

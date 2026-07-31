@@ -30,6 +30,12 @@ config.MessagePrefix = "[BossDPS]"
 config.BroadcastStart = true
 config.EnableProgressReports = false
 config.EnableDetailedAwards = false
+-- Show a final breakdown for the player character and every individual Pal.
+-- This is the easiest switch for users who want per-Pal damage, share and DPS.
+-- Dedicated servers keep it off by default to avoid extra chat lines.
+config.EnablePalDamageBreakdown = false
+-- Legacy alias kept for existing config files. Either switch enables the same
+-- breakdown; new installations should use EnablePalDamageBreakdown.
 config.EnableTeamDetails = false
 config.MarkTopAsMVP = true
 
@@ -42,7 +48,7 @@ config.MaxResultRows = 10
 config.ProgressIntervalSeconds = 10
 config.ProgressMaxRows = 4
 
--- Maximum player-character/Pal source rows when EnableTeamDetails is true.
+-- Maximum player-character/Pal source rows in the damage breakdown.
 config.TeamDetailMaxRows = 12
 
 -- Fun battle comments: progress comments only appear when a threshold is met;

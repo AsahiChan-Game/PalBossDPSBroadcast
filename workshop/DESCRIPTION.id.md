@@ -21,6 +21,9 @@ Serang Boss untuk memulai pencatatan otomatis. Hasil muncul di chat saat Boss di
 [*]Masuk ke dunia pemain tunggal dan serang Boss.
 [/olist]
 
+[h2]Damage setiap Pal[/h2]
+Mulai v1.2.0, rincian damage, persentase, dan DPS karakter pemain serta setiap Pal aktif secara default. Ubah [code]config.EnablePalDamageBreakdown = true[/code]; gunakan [code]false[/code] untuk hasil yang lebih ringkas. Arena Boss didukung, Arena PvP tidak.
+
 [h2]Cakupan[/h2]
 [list]
 [*][b]Didukung:[/b] dunia pemain tunggal

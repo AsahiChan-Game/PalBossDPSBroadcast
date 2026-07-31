@@ -337,6 +337,7 @@ assert(runtime_config.EnableFunComments == false, "fun comments should default t
 assert(runtime_config.BroadcastStart == true, "start reports should default to enabled")
 assert(runtime_config.EnableProgressReports == false, "progress reports should default to disabled")
 assert(runtime_config.EnableDetailedAwards == false, "detailed awards should default to disabled")
+assert(runtime_config.EnablePalDamageBreakdown == false, "Pal breakdown should default to disabled on servers")
 assert(runtime_config.EnableTeamDetails == false, "team details should default to disabled")
 assert(runtime_config.LocalOnlyMessages == false, "server package should not default to local-only messages")
 -- Most existing scenarios also exercise the enabled commentary branches.
@@ -828,11 +829,13 @@ local bob_inbox = delivered_by_uid[test_guid_key(uid_two)]
 local bob_before_local_only = #bob_inbox
 local previous_fun_comments = runtime_config.EnableFunComments
 local previous_progress = runtime_config.EnableProgressReports
+local previous_pal_breakdown = runtime_config.EnablePalDamageBreakdown
 local previous_details = runtime_config.EnableTeamDetails
 runtime_config.LocalOnlyMessages = true
 runtime_config.EnableFunComments = false
 runtime_config.EnableProgressReports = false
-runtime_config.EnableTeamDetails = true
+runtime_config.EnablePalDamageBreakdown = true
+runtime_config.EnableTeamDetails = false
 damage(player_one, local_only_boss, 600)
 damage(player_two_pal, local_only_boss, 400)
 death(local_only_boss)
@@ -847,8 +850,25 @@ assert(string.find(table.concat(local_only_messages, "\n"), "团队伤害 1,000"
 assert(#bob_inbox == bob_before_local_only,
     "remote contributor received a local-only single-player result")
 runtime_config.LocalOnlyMessages = false
+
+-- The clearer v3.4 setting must enable the same per-Pal report without the
+-- legacy EnableTeamDetails alias.
+local canonical_switch_boss = boss_actor("BP_RaidBoss_CanonicalSwitch_C_351")
+local bob_before_canonical_switch = #bob_inbox
+damage(player_two_pal, canonical_switch_boss, 400)
+death(canonical_switch_boss)
+run_game_tasks()
+run_delayed_tasks()
+local canonical_switch_messages = {}
+for index = bob_before_canonical_switch + 1, #bob_inbox do
+    canonical_switch_messages[#canonical_switch_messages + 1] = bob_inbox[index]
+end
+assert(string.find(table.concat(canonical_switch_messages, "\n"), "棉花糖（捣蛋猫）［Bob］｜伤害 400", 1, true) ~= nil,
+    "new Pal damage breakdown switch did not publish individual Pal damage")
+
 runtime_config.EnableFunComments = previous_fun_comments
 runtime_config.EnableProgressReports = previous_progress
+runtime_config.EnablePalDamageBreakdown = previous_pal_breakdown
 runtime_config.EnableTeamDetails = previous_details
 
 -- Repeated multi-hit Pal damage should reuse ownership, contributor, and Pal
@@ -992,4 +1012,4 @@ assert(#delivered_by_uid[test_guid_key(uid_spectator)] == 0, "spectator received
 
 assert(#BossDPSBroadcastTestApi.sessions == 0, "sessions table must be map-like")
 assert(original_os_time ~= nil)
-print("BossDPSBroadcast v3.3.0 integration/thread/lifetime/native/stress tests passed")
+print("BossDPSBroadcast v3.4.0 integration/thread/lifetime/native/stress tests passed")

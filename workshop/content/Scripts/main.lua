@@ -1070,6 +1070,12 @@ local function team_recipients(session, team_key)
     return recipients
 end
 
+local function pal_damage_breakdown_enabled()
+    -- EnableTeamDetails was the original, unclear setting name. Keep it as an
+    -- alias so existing server configs continue to work without migration.
+    return config.EnablePalDamageBreakdown == true or config.EnableTeamDetails == true
+end
+
 local function queue_team_details(session, duration)
     local max_rows = math.max(1, math.floor(to_number(config.TeamDetailMaxRows)))
     for team_key, team in pairs(session.teams) do
@@ -1340,7 +1346,7 @@ local function finish_session(session, reason)
         tostring(reason), session.name, format_integer(session.total_damage), duration, #rows
     ))
     queue_messages(messages, recipients)
-    if config.EnableTeamDetails == true then
+    if pal_damage_breakdown_enabled() then
         queue_team_details(session, duration)
     end
 end
@@ -2141,11 +2147,11 @@ local function register_hooks()
 
     if hooks.damage and hooks.death then
         log(string.format(
-            "loaded v3.3.0; collector=%s dps=%s progress=%s details=%s comments=%s local_only=%s; captured_hooks=%d",
+            "loaded v3.4.0; collector=%s dps=%s progress=%s pal_breakdown=%s comments=%s local_only=%s; captured_hooks=%d",
             hooks.damage_mode,
             tostring(config.EnableDPSRecording ~= false),
             tostring(config.EnableProgressReports == true),
-            tostring(config.EnableTeamDetails == true),
+            tostring(pal_damage_breakdown_enabled()),
             tostring(config.EnableFunComments ~= false),
             tostring(config.LocalOnlyMessages == true),
             hooks.captured_count

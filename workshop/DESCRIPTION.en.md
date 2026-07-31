@@ -21,6 +21,9 @@ Hit a Boss to start tracking automatically. When the Boss is defeated, captured,
 [*]Enter a single-player world and attack a Boss.
 [/olist]
 
+[h2]Per-Pal damage[/h2]
+Version 1.2.0 enables the final player-character and per-Pal breakdown by default. To change it, edit [code]config.EnablePalDamageBreakdown = true[/code] and use [code]false[/code] for a shorter result. Boss arenas are supported; the PvP Arena is not.
+
 [h2]Scope[/h2]
 [list]
 [*][b]Supported:[/b] single-player worlds

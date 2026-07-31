@@ -21,6 +21,9 @@ Acerte um chefe para iniciar o registro automaticamente. O resultado aparece no 
 [*]Entre em um mundo de um jogador e ataque um chefe.
 [/olist]
 
+[h2]Dano de cada Pal[/h2]
+Desde a v1.2.0, o detalhamento do personagem e de cada Pal vem ativado por padrão. Altere [code]config.EnablePalDamageBreakdown = true[/code] e use [code]false[/code] para um resultado menor. Arenas de chefes são compatíveis; a arena PvP não é.
+
 [h2]Compatibilidade[/h2]
 [list]
 [*][b]Compatível:[/b] mundos de um jogador

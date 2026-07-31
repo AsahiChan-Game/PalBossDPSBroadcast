@@ -21,6 +21,9 @@
 [*]Vào thế giới chơi đơn và tấn công Boss.
 [/olist]
 
+[h2]Sát thương của từng Pal[/h2]
+Từ v1.2.0, chi tiết sát thương, tỷ lệ và DPS của nhân vật cùng từng Pal được bật mặc định. Chỉnh [code]config.EnablePalDamageBreakdown = true[/code] và dùng [code]false[/code] để rút gọn kết quả. Đấu trường Boss được hỗ trợ, đấu trường PvP thì không.
+
 [h2]Phạm vi[/h2]
 [list]
 [*][b]Hỗ trợ:[/b] thế giới chơi đơn

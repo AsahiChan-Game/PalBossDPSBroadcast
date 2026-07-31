@@ -21,6 +21,9 @@ Golpea a un jefe para iniciar el registro automáticamente. El resultado aparece
 [*]Entra en un mundo de un jugador y ataca a un jefe.
 [/olist]
 
+[h2]Daño de cada Pal[/h2]
+Desde la v1.2.0, el desglose del personaje y de cada Pal está activado por defecto. Cambia [code]config.EnablePalDamageBreakdown = true[/code] y usa [code]false[/code] para un resultado más breve. Las arenas de jefes son compatibles; la arena JcJ no.
+
 [h2]Compatibilidad[/h2]
 [list]
 [*][b]Compatible:[/b] mundos de un jugador

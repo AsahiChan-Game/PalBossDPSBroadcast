@@ -21,6 +21,9 @@ Kaydı otomatik başlatmak için bir Boss'a vurun. Boss yenildiğinde, yakaland�
 [*]Tek oyunculu bir dünyaya girip Boss'a saldırın.
 [/olist]
 
+[h2]Her Pal'ın hasarı[/h2]
+v1.2.0 sürümünden itibaren oyuncu karakteri ve her Pal için hasar, oran ve DPS dökümü varsayılan olarak açıktır. [code]config.EnablePalDamageBreakdown = true[/code] ayarını değiştirin; kısa sonuç için [code]false[/code] kullanın. Boss arenaları desteklenir, PvP arenası desteklenmez.
+
 [h2]Kapsam[/h2]
 [list]
 [*][b]Desteklenen:[/b] tek oyunculu dünyalar
