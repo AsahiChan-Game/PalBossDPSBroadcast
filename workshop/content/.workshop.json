@@ -1,5 +1,5 @@
 {
     "publishedfileid":  "3769041368",
-    "changenote":  "v1.1.0: Added automatic localization for all 17 Palworld languages.",
-    "last_published_version":  "1.1.0"
+    "changenote":  "v1.2.0: Per-Pal damage breakdown is now enabled by default in single-player, with a clearer config switch.",
+    "last_published_version":  "1.2.0"
 }
