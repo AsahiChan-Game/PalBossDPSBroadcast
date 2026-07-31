@@ -1,6 +1,6 @@
-# PalBossDPSBroadcast v3.3.0
+# PalBossDPSBroadcast v3.4.0
 
-适用于 Palworld 1.0 专用服务器的 UE4SS Boss 伤害统计模组。v3.2 将高频伤害采集移到可选 C++ 聚合器；v3.3 新增 Palworld 官方全部 17 种语言的自动本地化。原生组件不可用时默认自动回退到纯 Lua。
+适用于 Palworld 1.0 专用服务器的 UE4SS Boss 伤害统计模组。v3.2 将高频伤害采集移到可选 C++ 聚合器；v3.3 新增 Palworld 官方全部 17 种语言的自动本地化；v3.4 增加直观的逐只帕鲁伤害明细开关。原生组件不可用时默认自动回退到纯 Lua。
 
 服务端自动统计 Boss 战中的团队伤害、玩家综合伤害、占比和 DPS，并通过游戏聊天窗口向本场实际参与者发送结算。客户端无需安装。
 
@@ -73,7 +73,7 @@ Lua 回退路径仍可兼容其他 UE4SS 3.x，但随 Release 提供的 C++ DLL 
 6. 启动服务器，在 `ue4ss/UE4SS.log` 中搜索：
 
    ```text
-   [BossDPSBroadcast] loaded v3.3.0; collector=native
+   [BossDPSBroadcast] loaded v3.4.0; collector=native
    ```
 
 若显示 `collector=lua-fallback`，统计仍可工作，但高频伤害仍走旧 Lua 路径。更新旧版本时，先备份自己的 `Scripts/config.lua`，再覆盖模组文件并重新应用配置。
@@ -97,7 +97,8 @@ Lua 回退路径仍可兼容其他 UE4SS 3.x，但随 Release 提供的 C++ DLL 
 | `ProgressMaxRows` | `4` | 实时战况最多显示的玩家数 |
 | `EnableFunComments` | `false` | 开启阈值点评和结算点评 |
 | `EnableDetailedAwards` | `false` | 显示最高队伍、玩家角色和帕鲁奖项 |
-| `EnableTeamDetails` | `false` | 向队内发送玩家角色和逐只帕鲁明细 |
+| `EnablePalDamageBreakdown` | `false` | 显示玩家角色及每只帕鲁的伤害、占比和 DPS；创意工坊单机版默认 `true` |
+| `EnableTeamDetails` | `false` | 旧版兼容别名；设为 `true` 也会开启同一份明细 |
 | `TeamDetailMaxRows` | `12` | 队内明细最大行数 |
 | `MarkTopAsMVP` | `true` | 将第一名标记为 `MVP #1` |
 | `MaxResultRows` | `10` | 最终综合排名最大行数 |
@@ -123,15 +124,29 @@ Lua 回退路径仍可兼容其他 UE4SS 3.x，但随 Release 提供的 C++ DLL 
 
 ### 完全没有战报
 
-检查两个 `enabled.txt` 是否存在、`EnableDPSRecording` 是否为 `true`，并在 `UE4SS.log` 中确认出现 `loaded v3.3.0`。
+检查两个 `enabled.txt` 是否存在、`EnableDPSRecording` 是否为 `true`，并在 `UE4SS.log` 中确认出现 `loaded v3.4.0`。
 
 ### 别人的 Boss 战也发给我，或三个人重复三遍
 
-这是旧版将单个 `FGuid` 错当成收件人数组导致的问题。v3.0.0 及以上版本使用一次调用中的完整 `TArray<FGuid>`。确认日志加载的是 v3.3.0，而不是旧版本。
+这是旧版将单个 `FGuid` 错当成收件人数组导致的问题。v3.0.0 及以上版本使用一次调用中的完整 `TArray<FGuid>`。确认日志加载的是 v3.4.0，而不是旧版本。
 
 ### 月亮领主出现四次统计或战斗时明显卡顿
 
-v3.3.0 会先在 C++ 中合并同一目标/来源的高频命中；Lua 再将身体、头部和左右部件合并成一场遭遇。确认日志显示 `collector=native`，并且只出现一次 `session started boss=月亮领主`。
+v3.4.0 会先在 C++ 中合并同一目标/来源的高频命中；Lua 再将身体、头部和左右部件合并成一场遭遇。确认日志显示 `collector=native`，并且只出现一次 `session started boss=月亮领主`。
+
+### 怎么显示每一只帕鲁的伤害
+
+在 `Scripts/config.lua` 中设置：
+
+```lua
+config.EnablePalDamageBreakdown = true
+```
+
+结算会额外列出玩家角色和每只参战帕鲁的伤害、队内占比及 DPS，帕鲁优先显示玩家设置的昵称。专用服务器默认关闭以减少聊天行数；创意工坊单机版从 v1.2.0 起默认开启。修改后需要重启游戏或服务器一次。
+
+### 竞技场能否统计
+
+如果“竞技场”指 Boss、塔主或召唤 Boss 的战斗场地，只要开战时出现“开始统计”，逐只帕鲁明细就会正常结算。如果指玩家对战的 PvP 竞技场，则当前 Boss 模式不会统计：模组会主动排除玩家拥有的目标，避免把对手帕鲁误判成世界 Boss。
 
 ### 捕捉后不立即结算
 
@@ -145,7 +160,7 @@ capture completion hook=/Script/Pal.PalUtility:PalCaptureSuccess
 
 ### 聊天窗口信息太多
 
-使用默认配置，或关闭 `BroadcastStart`、`EnableProgressReports`、`EnableFunComments`、`EnableDetailedAwards` 和 `EnableTeamDetails`。
+使用默认服务端配置，或关闭 `BroadcastStart`、`EnableProgressReports`、`EnableFunComments`、`EnableDetailedAwards`、`EnablePalDamageBreakdown` 和 `EnableTeamDetails`。
 
 ## 测试
 

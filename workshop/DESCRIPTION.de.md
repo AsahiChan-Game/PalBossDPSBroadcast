@@ -21,6 +21,9 @@ Greife einen Boss an, um die Messung automatisch zu starten. Das Ergebnis ersche
 [*]Betritt eine Einzelspielerwelt und greife einen Boss an.
 [/olist]
 
+[h2]Schaden pro Pal[/h2]
+Ab v1.2.0 ist die Aufschlüsselung nach Spielerfigur und jedem Pal standardmäßig aktiv. Ändere [code]config.EnablePalDamageBreakdown = true[/code]; mit [code]false[/code] wird das Ergebnis kürzer. Boss-Arenen werden unterstützt, die PvP-Arena nicht.
+
 [h2]Geltungsbereich[/h2]
 [list]
 [*][b]Unterstützt:[/b] Einzelspielerwelten

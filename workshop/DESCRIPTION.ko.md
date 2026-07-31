@@ -21,6 +21,9 @@
 [*]싱글 플레이 월드에 들어가 보스를 공격합니다.
 [/olist]
 
+[h2]팰별 피해량[/h2]
+v1.2.0부터 플레이어 캐릭터와 각 팰의 피해, 비율, DPS가 기본으로 표시됩니다. [code]config.EnablePalDamageBreakdown = true[/code]에서 설정하며, 짧은 결과를 원하면 [code]false[/code]로 바꾸세요. 보스 전투장은 지원하지만 PvP 아레나는 지원하지 않습니다.
+
 [h2]지원 범위[/h2]
 [list]
 [*][b]지원:[/b] 싱글 플레이 월드

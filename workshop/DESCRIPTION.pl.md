@@ -21,6 +21,9 @@ Uderz Bossa, aby automatycznie rozpocząć pomiar. Wynik pojawi się na czacie p
 [*]Wejdź do świata jednoosobowego i zaatakuj Bossa.
 [/olist]
 
+[h2]Obrażenia każdego Pala[/h2]
+Od v1.2.0 szczegóły obrażeń, udziału i DPS postaci oraz każdego Pala są domyślnie włączone. Zmień [code]config.EnablePalDamageBreakdown = true[/code]; ustaw [code]false[/code], aby skrócić wynik. Areny Bossów są obsługiwane, arena PvP nie.
+
 [h2]Zakres[/h2]
 [list]
 [*][b]Obsługiwane:[/b] światy jednoosobowe

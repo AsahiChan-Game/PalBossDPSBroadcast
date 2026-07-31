@@ -21,6 +21,12 @@ config.MessagePrefix = "[BossDPS]"
 config.BroadcastStart = true
 config.EnableProgressReports = false
 config.EnableDetailedAwards = false
+-- Show the player character and every individual Pal in the final result.
+-- Single-player enables this by default because the extra lines are local and
+-- do not flood other players. Set false for the compact result only.
+config.EnablePalDamageBreakdown = true
+-- Legacy alias. Existing users may still enable this old name; new users only
+-- need to change EnablePalDamageBreakdown.
 config.EnableTeamDetails = false
 config.MarkTopAsMVP = true
 
@@ -33,7 +39,7 @@ config.MaxResultRows = 10
 config.ProgressIntervalSeconds = 10
 config.ProgressMaxRows = 4
 
--- Maximum player-character/Pal source rows when EnableTeamDetails is true.
+-- Maximum player-character/Pal source rows in the damage breakdown.
 config.TeamDetailMaxRows = 12
 
 -- Fun battle comments: progress comments only appear when a threshold is met;

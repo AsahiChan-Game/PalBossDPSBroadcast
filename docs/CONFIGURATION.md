@@ -15,6 +15,7 @@ config.BroadcastStart = true
 config.EnableProgressReports = false
 config.EnableFunComments = false
 config.EnableDetailedAwards = false
+config.EnablePalDamageBreakdown = false
 config.EnableTeamDetails = false
 config.MarkTopAsMVP = true
 ```
@@ -58,17 +59,29 @@ config.ProgressMaxRows = 4
 
 实时战况只发给已经对该 Boss 造成过伤害的玩家。石板 Boss 或长时间战斗可能产生较多消息，公共服务器建议保持关闭。
 
-### 详细分析模式
+### 显示玩家角色和每只帕鲁的伤害
 
 在默认配置基础上开启：
 
 ```lua
-config.EnableDetailedAwards = true
-config.EnableTeamDetails = true
+config.EnablePalDamageBreakdown = true
 config.TeamDetailMaxRows = 12
 ```
 
-`EnableDetailedAwards` 会增加最高伤害队伍、玩家角色和帕鲁奖项。`EnableTeamDetails` 会按队伍发送每个玩家角色和每只帕鲁的伤害来源明细。
+结算时会额外列出玩家角色和每只参战帕鲁的伤害、队内占比与 DPS。帕鲁优先显示玩家设置的昵称，未设置昵称时显示物种名。专用服务器默认关闭，避免多人战斗产生太多聊天行；创意工坊单机版从 v1.2.0 起默认开启。
+
+旧配置项 `EnableTeamDetails = true` 仍然有效，是同一功能的兼容别名。建议新配置统一改用 `EnablePalDamageBreakdown`。
+
+如果还想显示最高伤害队伍、最高伤害玩家角色和最高伤害帕鲁等奖项，可以另外开启：
+
+```lua
+config.EnableDetailedAwards = true
+```
+
+### 竞技场边界
+
+- Boss 房间、塔主战和召唤 Boss 场地：只要首次有效命中时出现“开始统计”，就支持玩家角色与逐只帕鲁的明细结算。
+- 玩家对战的 PvP 竞技场：当前 Boss 模式不统计。模组会主动排除玩家拥有的受击目标，避免把对手帕鲁误判成世界 Boss。
 
 ### 完全关闭 DPS 模组
 

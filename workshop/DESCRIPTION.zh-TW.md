@@ -21,6 +21,9 @@
 [*]進入單人世界並攻擊 Boss。
 [/olist]
 
+[h2]每隻帕魯的傷害[/h2]
+v1.2.0 預設在結算中顯示玩家角色與每隻帕魯的傷害、占比及 DPS。可修改 [code]config.EnablePalDamageBreakdown = true[/code]；設為 [code]false[/code] 可精簡戰報。Boss 戰鬥場地支援統計，PvP 競技場目前不支援。
+
 [h2]適用範圍[/h2]
 [list]
 [*][b]支援：[/b]單人世界

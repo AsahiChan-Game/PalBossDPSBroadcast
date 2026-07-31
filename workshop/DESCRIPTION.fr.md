@@ -21,6 +21,9 @@ Frappez un Boss pour lancer automatiquement le suivi. Le résultat apparaît dan
 [*]Entrez dans un monde solo et attaquez un Boss.
 [/olist]
 
+[h2]Dégâts par Pal[/h2]
+Depuis la v1.2.0, le détail des dégâts, du pourcentage et du DPS du joueur et de chaque Pal est activé par défaut. Modifiez [code]config.EnablePalDamageBreakdown = true[/code] et utilisez [code]false[/code] pour un résultat plus court. Les arènes de Boss sont prises en charge, pas l'arène JcJ.
+
 [h2]Compatibilité[/h2]
 [list]
 [*][b]Pris en charge :[/b] mondes solo
