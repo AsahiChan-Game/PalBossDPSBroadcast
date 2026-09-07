@@ -27,9 +27,12 @@ config.EnableFunComments = false
 
 ```lua
 config.EnablePalDamageBreakdown = true
+config.PalDamageBreakdownScope = "personal"
 ```
 
-设为 `false` 可恢复更精简的最终战报。Boss 房间、塔主战和召唤 Boss 场地均可统计；玩家对战的 PvP 竞技场目前不支持。
+v1.2.1 起默认 `"personal"`：显示本人角色和每只帕鲁的贡献，占比按本人的总伤害计算。设为 `"team"` 则查看本场同公会参战者的明细，但房主模式仍只向本机发送。旧配置没有范围项时保留公会模式。
+
+将 `EnablePalDamageBreakdown` 设为 `false` 可恢复精简战报，优先于旧的 `EnableTeamDetails` 开关；只有新开关不存在时才读取旧开关。保存后重启游戏生效。Boss 房间、塔主战和召唤 Boss 场地可统计；玩家对战的 PvP 竞技场目前不支持。
 
 ## 运行边界
 

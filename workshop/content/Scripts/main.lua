@@ -1045,72 +1045,73 @@ local function queue_messages(messages, recipients)
     end
 end
 
-local function team_recipients(session, team_key)
-    local recipients = {}
-    for _, entry in pairs(session.contributors) do
-        if entry.team_key == team_key then
-            local uid = copy_guid(entry.uid)
-            if uid ~= nil then
-                recipients[#recipients + 1] = uid
-            end
-        end
-    end
-    if config.LocalOnlyMessages == true then
-        local local_uid = local_player_uid()
-        local local_key = guid_key(local_uid)
-        local contributor = local_key ~= nil and session.contributors[local_key] or nil
-        if contributor ~= nil and contributor.team_key == team_key then
-            return { copy_guid(local_uid) }
-        end
-        if local_uid == nil and #recipients == 1 then
-            return recipients
-        end
-        return {}
-    end
-    return recipients
-end
-
 local function pal_damage_breakdown_enabled()
-    -- EnableTeamDetails was the original, unclear setting name. Keep it as an
-    -- alias so existing server configs continue to work without migration.
-    return config.EnablePalDamageBreakdown == true or config.EnableTeamDetails == true
+    -- An explicit new switch wins, including false. Old configs which omit
+    -- it still use EnableTeamDetails.
+    if config.EnablePalDamageBreakdown ~= nil then
+        return config.EnablePalDamageBreakdown == true
+    end
+    return config.EnableTeamDetails == true
 end
 
 local function queue_team_details(session, duration)
-    local max_rows = math.max(1, math.floor(to_number(config.TeamDetailMaxRows)))
-    for team_key, team in pairs(session.teams) do
-        local sources = {}
-        for _, entry in pairs(session.contributors) do
-            if entry.team_key == team_key and entry.direct_damage > 0 then
-                sources[#sources + 1] = {
-                    name = tr("player_role", { player = entry.name }),
-                    damage = entry.direct_damage,
-                    hits = entry.direct_hits,
-                }
-            end
+    -- Missing scope keeps older configs on their original guild-wide report.
+    local personal = config.PalDamageBreakdownScope == "personal"
+    local max_rows = math.max(1, math.floor(to_number(config.TeamDetailMaxRows or 12)))
+    local groups = {}
+    -- Reuse the encounter-level recipient filter: local-only mode must never
+    -- fall back separately for each one-person guild in a multiplayer fight.
+    for _, uid in ipairs(session_recipients(session)) do
+        local key = guid_key(uid)
+        local entry = session.contributors[key]
+        local group_key = personal and key or entry.team_key
+        local group = groups[group_key]
+        if group == nil then
+            group = {
+                name = personal and tr("solo_team", { player = entry.name })
+                    or session.teams[group_key].name,
+                damage = personal and entry.damage or session.teams[group_key].damage,
+                recipients = {},
+                sources = {},
+            }
+            groups[group_key] = group
         end
-        for _, pal in pairs(session.pal_sources) do
-            if pal.team_key == team_key and pal.damage > 0 then
-                sources[#sources + 1] = {
-                    name = pal.name .. "［" .. pal.owner_name .. "］",
-                    damage = pal.damage,
-                    hits = pal.hits,
-                }
-            end
+        group.recipients[#group.recipients + 1] = uid
+    end
+    for key, entry in pairs(session.contributors) do
+        local group = groups[personal and key or entry.team_key]
+        if group ~= nil and entry.direct_damage > 0 then
+            group.sources[#group.sources + 1] = {
+                name = tr("player_role", { player = entry.name }),
+                damage = entry.direct_damage,
+                hits = entry.direct_hits,
+            }
         end
-        sources = ranked_damage_entries(sources)
+    end
+    for _, pal in pairs(session.pal_sources) do
+        local group = groups[personal and pal.owner_uid_key or pal.team_key]
+        if group ~= nil and pal.damage > 0 then
+            group.sources[#group.sources + 1] = {
+                name = pal.name .. "［" .. pal.owner_name .. "］",
+                damage = pal.damage,
+                hits = pal.hits,
+            }
+        end
+    end
+    for _, group in pairs(groups) do
+        local sources = ranked_damage_entries(group.sources)
 
         local messages = {
             tr("team_report", {
-                team = team.name,
-                damage = format_integer(team.damage),
-                dps = format_integer(team.damage / duration),
+                team = group.name,
+                damage = format_integer(group.damage),
+                dps = format_integer(group.damage / duration),
                 sources = #sources,
             }),
         }
         for index = 1, math.min(max_rows, #sources) do
             local source = sources[index]
-            local percent = team.damage > 0 and source.damage * 100 / team.damage or 0
+            local percent = group.damage > 0 and source.damage * 100 / group.damage or 0
             messages[#messages + 1] = tr("team_row", {
                 rank = index,
                 source = source.name,
@@ -1124,7 +1125,7 @@ local function queue_team_details(session, duration)
                 count = #sources - max_rows,
             })
         end
-        queue_messages(messages, team_recipients(session, team_key))
+        queue_messages(messages, group.recipients)
     end
 end
 
@@ -2147,7 +2148,7 @@ local function register_hooks()
 
     if hooks.damage and hooks.death then
         log(string.format(
-            "loaded v3.4.0; collector=%s dps=%s progress=%s pal_breakdown=%s comments=%s local_only=%s; captured_hooks=%d",
+            "loaded v3.4.1; collector=%s dps=%s progress=%s pal_breakdown=%s comments=%s local_only=%s; captured_hooks=%d",
             hooks.damage_mode,
             tostring(config.EnableDPSRecording ~= false),
             tostring(config.EnableProgressReports == true),

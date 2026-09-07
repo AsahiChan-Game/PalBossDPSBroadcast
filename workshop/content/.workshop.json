@@ -1,5 +1,5 @@
 {
     "publishedfileid":  "3769041368",
-    "changenote":  "v1.2.0: Per-Pal damage breakdown is now enabled by default in single-player, with a clearer config switch.",
-    "last_published_version":  "1.2.0"
+    "changenote":  "v1.2.1: Personal Pal breakdowns, reliable disable switch, and safer local-only reports.",
+    "last_published_version":  "1.2.1"
 }

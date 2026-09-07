@@ -25,9 +25,13 @@ config.EnableDetailedAwards = false
 -- Single-player enables this by default because the extra lines are local and
 -- do not flood other players. Set false for the compact result only.
 config.EnablePalDamageBreakdown = true
--- Legacy alias. Existing users may still enable this old name; new users only
--- need to change EnablePalDamageBreakdown.
+-- Legacy fallback, used only if EnablePalDamageBreakdown is absent.
+-- Explicit true/false in the new switch takes priority.
 config.EnableTeamDetails = false
+-- "personal": only your character and your Pals; share uses your own total.
+-- "team": contributing guild members and their Pals; share uses guild total.
+-- LocalOnlyMessages still limits delivery to the local player in either mode.
+config.PalDamageBreakdownScope = "personal"
 config.MarkTopAsMVP = true
 
 -- Maximum number of contributors shown in the final ranking.

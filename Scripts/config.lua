@@ -34,9 +34,14 @@ config.EnableDetailedAwards = false
 -- This is the easiest switch for users who want per-Pal damage, share and DPS.
 -- Dedicated servers keep it off by default to avoid extra chat lines.
 config.EnablePalDamageBreakdown = false
--- Legacy alias kept for existing config files. Either switch enables the same
--- breakdown; new installations should use EnablePalDamageBreakdown.
+-- Legacy fallback, used only if EnablePalDamageBreakdown is absent.
+-- Explicit true/false in the new switch takes priority.
 config.EnableTeamDetails = false
+-- "personal": only your character and your Pals, sent only to you.
+-- "team": all contributing guild members and their Pals, shared with them.
+-- Percentages use your own total in personal mode, guild total in team mode.
+-- Old configs without this setting keep the original team report.
+config.PalDamageBreakdownScope = "personal"
 config.MarkTopAsMVP = true
 
 -- Maximum number of contributors shown in the final ranking.
