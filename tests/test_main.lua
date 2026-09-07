@@ -338,6 +338,7 @@ assert(runtime_config.BroadcastStart == true, "start reports should default to e
 assert(runtime_config.EnableProgressReports == false, "progress reports should default to disabled")
 assert(runtime_config.EnableDetailedAwards == false, "detailed awards should default to disabled")
 assert(runtime_config.EnablePalDamageBreakdown == false, "Pal breakdown should default to disabled on servers")
+assert(runtime_config.PalDamageBreakdownScope == "personal", "new configs should default to personal breakdowns")
 assert(runtime_config.EnableTeamDetails == false, "team details should default to disabled")
 assert(runtime_config.LocalOnlyMessages == false, "server package should not default to local-only messages")
 -- Most existing scenarios also exercise the enabled commentary branches.
@@ -345,6 +346,9 @@ runtime_config.EnableFunComments = true
 runtime_config.BroadcastStart = true
 runtime_config.EnableProgressReports = true
 runtime_config.EnableDetailedAwards = true
+-- Exercise the pre-v3.4 config path throughout the original scenarios.
+runtime_config.EnablePalDamageBreakdown = nil
+runtime_config.PalDamageBreakdownScope = nil
 runtime_config.EnableTeamDetails = true
 
 local commentary = require("commentary")
@@ -871,6 +875,107 @@ runtime_config.EnableProgressReports = previous_progress
 runtime_config.EnablePalDamageBreakdown = previous_pal_breakdown
 runtime_config.EnableTeamDetails = previous_details
 
+-- Same-guild players need personal denominators and private source rows.
+-- Also cover old configs, contradictory switches, row limits and local-only
+-- delivery with/without a resolvable local player.
+do
+    local alice_pal = actor("BP_PinkCat_C_Personal", {
+        CharacterParameterComponent = object({
+            IndividualParameter = object({}, {
+                GetAddress = function() return 9199 end,
+                GetCharacterID = function() return "PinkCat" end,
+                GetNickname = function(_, out_name) out_name.outName = "小白" end,
+            }),
+        }),
+    })
+    trainer_by_actor[alice_pal] = player_one
+    player_two_state.GuildBelongTo = guild_one
+    local saved_controller = local_player_controller
+    local saved_awards = runtime_config.EnableDetailedAwards
+    local saved_comments = runtime_config.EnableFunComments
+    local saved_start = runtime_config.BroadcastStart
+    local saved_rows = runtime_config.TeamDetailMaxRows
+    runtime_config.EnableDetailedAwards = false
+    runtime_config.EnableFunComments = false
+    runtime_config.BroadcastStart = false
+
+    local encounter_index = 0
+    local function fight()
+        encounter_index = encounter_index + 1
+        local target = boss_actor("BP_RaidBoss_Personal_" .. encounter_index)
+        local alice_before, bob_before = #delivered, #bob_inbox
+        damage(player_one, target, 600)
+        damage(alice_pal, target, 400)
+        damage(player_two, target, 200)
+        damage(player_two_pal, target, 800)
+        death(target)
+        run_game_tasks()
+        run_delayed_tasks()
+        local a, b = {}, {}
+        for index = alice_before + 1, #delivered do a[#a + 1] = delivered[index] end
+        for index = bob_before + 1, #bob_inbox do b[#b + 1] = bob_inbox[index] end
+        return table.concat(a, "\n"), table.concat(b, "\n")
+    end
+
+    runtime_config.EnablePalDamageBreakdown = true
+    runtime_config.EnableTeamDetails = false
+    runtime_config.PalDamageBreakdownScope = "personal"
+    local a, b = fight()
+    assert(string.find(a, "团队伤害 2,000", 1, true), "personal reports changed encounter total")
+    assert(string.find(a, "队内私报：Alice的小队｜伤害 1,000", 1, true), "personal total uses guild damage")
+    assert(string.find(a, "小白（捣蛋猫）［Alice］｜伤害 400｜40.0%", 1, true), "Alice Pal share incorrect")
+    assert(string.find(b, "棉花糖（捣蛋猫）［Bob］｜伤害 800｜80.0%", 1, true), "Bob Pal share incorrect")
+    assert(not string.find(a, "棉花糖（捣蛋猫）［Bob］", 1, true), "Bob's details leaked to Alice")
+    assert(not string.find(b, "小白（捣蛋猫）［Alice］", 1, true), "Alice's details leaked to Bob")
+    assert(count_plain(a, "队内私报：") == 1 and count_plain(b, "队内私报：") == 1,
+        "personal reports were duplicated")
+
+    runtime_config.TeamDetailMaxRows = 1
+    a, b = fight()
+    assert(string.find(a, "Alice（玩家角色）｜伤害 600｜60.0%", 1, true), "row limit changed denominator")
+    assert(string.find(a, "其余 1 个伤害来源未展开", 1, true), "row limit hid truncation notice")
+    runtime_config.TeamDetailMaxRows = saved_rows
+
+    runtime_config.EnablePalDamageBreakdown = false
+    runtime_config.EnableTeamDetails = true
+    a, b = fight()
+    assert(not string.find(a .. b, "队内私报：", 1, true), "legacy true overrode explicit false")
+    assert(string.find(a, "MVP #1", 1, true), "disabling details removed the shared ranking")
+
+    runtime_config.EnablePalDamageBreakdown = nil
+    runtime_config.PalDamageBreakdownScope = nil
+    a, b = fight()
+    assert(string.find(a, "队内私报：红队｜伤害 2,000", 1, true), "legacy team report changed")
+    assert(string.find(a, "棉花糖（捣蛋猫）［Bob］｜伤害 800｜40.0%", 1, true), "team mode share incorrect")
+    assert(string.find(b, "小白（捣蛋猫）［Alice］｜伤害 400｜20.0%", 1, true), "legacy guild source missing")
+    assert(count_plain(a, "队内私报：") == 1, "guild reports were duplicated")
+
+    runtime_config.EnablePalDamageBreakdown = true
+    runtime_config.LocalOnlyMessages = true
+    for _, scope in ipairs({ "personal", "team" }) do
+        runtime_config.PalDamageBreakdownScope = scope
+        a, b = fight()
+        assert(string.find(a, "队内私报：", 1, true) and b == "", "local-only report reached remote player")
+    end
+
+    -- Different one-person guilds must not bypass the encounter-wide filter.
+    player_two_state.GuildBelongTo = nil
+    local_player_controller = nil
+    for _, scope in ipairs({ "personal", "team" }) do
+        runtime_config.PalDamageBreakdownScope = scope
+        a, b = fight()
+        assert(a == "" and b == "", "unresolved local player leaked per-guild details")
+    end
+    local_player_controller = saved_controller
+    runtime_config.LocalOnlyMessages = false
+    runtime_config.EnablePalDamageBreakdown = previous_pal_breakdown
+    runtime_config.EnableTeamDetails = previous_details
+    runtime_config.PalDamageBreakdownScope = nil
+    runtime_config.EnableDetailedAwards = saved_awards
+    runtime_config.EnableFunComments = saved_comments
+    runtime_config.BroadcastStart = saved_start
+end
+
 -- Repeated multi-hit Pal damage should reuse ownership, contributor, and Pal
 -- metadata instead of calling the full reflected lookup chain for every hit.
 local performance_boss = boss_actor("BP_RaidBoss_Performance_C_401")
@@ -1012,4 +1117,4 @@ assert(#delivered_by_uid[test_guid_key(uid_spectator)] == 0, "spectator received
 
 assert(#BossDPSBroadcastTestApi.sessions == 0, "sessions table must be map-like")
 assert(original_os_time ~= nil)
-print("BossDPSBroadcast v3.4.0 integration/thread/lifetime/native/stress tests passed")
+print("BossDPSBroadcast v3.4.1 integration/thread/lifetime/native/stress tests passed")

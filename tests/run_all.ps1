@@ -75,7 +75,7 @@ $workshopInfo = Get-Content -LiteralPath (Join-Path $workshopDirectory "Info.jso
 $expectedWorkshopTitle = -join @([char]0x4E0D, [char]0x8981, [char]0x67E5, [char]0x6211, "D", "P", "S")
 if ($workshopInfo.ModName -ne $expectedWorkshopTitle) { throw "unexpected Workshop ModName" }
 if ($workshopInfo.PackageName -ne "PalBossDPSBroadcastSP") { throw "unexpected Workshop PackageName" }
-if ($workshopInfo.Version -ne "1.2.0") { throw "unexpected Workshop version" }
+if ($workshopInfo.Version -ne "1.2.1") { throw "unexpected Workshop version" }
 if ($workshopInfo.Dependencies -notcontains "UE4SSExperimentalPW") { throw "Workshop UE4SS dependency missing" }
 if ($workshopInfo.InstallRule.Count -ne 1 -or $workshopInfo.InstallRule[0].Type -ne "Lua") {
     throw "Workshop Lua InstallRule missing"
@@ -102,7 +102,8 @@ $workshopConfig = Get-Content -LiteralPath (Join-Path $workshopScripts "config.l
 foreach ($requiredSetting in @(
     "config.LocalOnlyMessages = true",
     "config.EnableFunComments = true",
-    "config.EnablePalDamageBreakdown = true"
+    "config.EnablePalDamageBreakdown = true",
+    'config.PalDamageBreakdownScope = "personal"'
 )) {
     if (-not $workshopConfig.Contains($requiredSetting)) { throw "Workshop config missing: $requiredSetting" }
 }
@@ -142,7 +143,7 @@ try {
     $testOutput = & npx --yes --package=fengari-node-cli fengari test_main.lua 2>&1
     $testExitCode = $LASTEXITCODE
     $testOutput | Write-Host
-    if ($testExitCode -ne 0 -or -not ($testOutput -match "v3\.4\.0 integration/thread/lifetime/native/stress tests passed")) {
+    if ($testExitCode -ne 0 -or -not ($testOutput -match "v3\.4\.1 integration/thread/lifetime/native/stress tests passed")) {
         throw "Lua integration test failed or did not reach its completion marker"
     }
     $localeOutput = & npx --yes --package=fengari-node-cli fengari test_localization.lua 2>&1

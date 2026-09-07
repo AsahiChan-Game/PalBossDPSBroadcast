@@ -58,7 +58,7 @@ $vdf = @(
     ('    "visibility" "{0}"' -f $Visibility)
     ('    "title" "{0}"' -f (ConvertTo-VdfValue $workshopTitle))
     ('    "description" "{0}"' -f (ConvertTo-VdfValue $description))
-    '    "changenote" "v1.2.0: Per-Pal damage breakdown is now enabled by default in single-player, with a clearer config switch."'
+    '    "changenote" "v1.2.1: Personal Pal breakdowns, reliable disable switch, and safer local-only reports."'
     '}'
 ) -join "`r`n"
 [System.IO.File]::WriteAllText($vdfPath, $vdf, [System.Text.UTF8Encoding]::new($false))
@@ -76,8 +76,8 @@ if (-not $match.Success -or $match.Groups[1].Value -eq "0") {
 }
 
 $metadata.publishedfileid = $match.Groups[1].Value
-$metadata.changenote = "v1.2.0: Per-Pal damage breakdown is now enabled by default in single-player, with a clearer config switch."
-$metadata.last_published_version = "1.2.0"
+$metadata.changenote = "v1.2.1: Personal Pal breakdowns, reliable disable switch, and safer local-only reports."
+$metadata.last_published_version = "1.2.1"
 $metadataJson = $metadata | ConvertTo-Json -Depth 4
 [System.IO.File]::WriteAllText($metadataPath, $metadataJson + "`r`n", [System.Text.UTF8Encoding]::new($false))
 

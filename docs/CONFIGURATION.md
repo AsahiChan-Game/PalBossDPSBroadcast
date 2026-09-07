@@ -1,6 +1,6 @@
 # 配置说明
 
-配置文件位于 `Scripts/config.lua`。所有开关都在服务端读取，修改后重启服务器一次即可生效，客户端无需改动。
+配置文件位于模组的 `Scripts/config.lua`。专用服务器版由管理员修改后重启服务器，客户端无需改动；创意工坊单机版修改后重启 Palworld。
 
 ## 推荐预设
 
@@ -65,12 +65,24 @@ config.ProgressMaxRows = 4
 
 ```lua
 config.EnablePalDamageBreakdown = true
+config.PalDamageBreakdownScope = "personal"
 config.TeamDetailMaxRows = 12
 ```
 
 结算时会额外列出玩家角色和每只参战帕鲁的伤害、队内占比与 DPS。帕鲁优先显示玩家设置的昵称，未设置昵称时显示物种名。专用服务器默认关闭，避免多人战斗产生太多聊天行；创意工坊单机版从 v1.2.0 起默认开启。
 
-旧配置项 `EnableTeamDetails = true` 仍然有效，是同一功能的兼容别名。建议新配置统一改用 `EnablePalDamageBreakdown`。
+`PalDamageBreakdownScope` 决定明细范围：
+
+| 值 | 包含的伤害来源 | 谁能收到 | 占比分母 |
+|---|---|---|---|
+| `"personal"` | 本人角色与本人每只参战帕鲁 | 本人 | 本人角色与帕鲁伤害之和 |
+| `"team"` | 本场同公会参战者的角色与帕鲁 | 本场同公会参战者 | 本场公会总伤害 |
+
+新配置默认 `"personal"`；旧配置缺少此项时保留原公会模式。房主的 `LocalOnlyMessages=true` 在两种范围下均只向本机发送。团队综合排名不受这个范围开关影响。
+
+例如本人武器打了 600、帕鲁打了 400，个人明细分别是 60% 和 40%，即使同公会其他玩家也参战。仅显示造成过伤害的来源；`TeamDetailMaxRows` 限制显示行数，不减少伤害统计，超出时会提示还有多少来源未展开。
+
+v3.4.1 / 单机 v1.2.1 起，`EnablePalDamageBreakdown` 的明确值优先；设为 `false` 即可关闭明细。仅当该配置项不存在时，才读取旧的 `EnableTeamDetails`。旧配置不必强制迁移；合并配置时建议删除旧开关，避免混淆。
 
 如果还想显示最高伤害队伍、最高伤害玩家角色和最高伤害帕鲁等奖项，可以另外开启：
 
